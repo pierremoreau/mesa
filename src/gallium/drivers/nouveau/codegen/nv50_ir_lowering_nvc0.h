@@ -101,6 +101,7 @@ protected:
    bool handleMOD(Instruction *);
    bool handleSQRT(Instruction *);
    bool handlePOW(Instruction *);
+   bool handleCVT(Instruction *);
    bool handleTEX(TexInstruction *);
    bool handleTXD(TexInstruction *);
    bool handleTXQ(TexInstruction *);

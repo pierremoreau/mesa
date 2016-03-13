@@ -2818,6 +2818,54 @@ NVC0LoweringPass::handleOUT(Instruction *i)
    return true;
 }
 
+// TODO(pmoreau): check the implementation
+bool
+NVC0LoweringPass::handleCVT(Instruction *i)
+{
+   if (isFloatType(i->dType) || isFloatType(i->sType))
+      return true;
+
+   if (i->saturate && (typeSizeof(i->sType) > typeSizeof(i->dType))) {
+      if (isSignedIntType(i->sType) && !isSignedIntType(i->dType)) {
+         // Signed to unsigned: only need to clamp to 0
+         Value *minValue = bld.mkOp2v(OP_MAX, i->sType, bld.getSSA(), i->getSrc(0), bld.loadImm(NULL, 0));
+         i->setSrc(0, minValue);
+      } else if (!isSignedIntType(i->sType) && isSignedIntType(i->dType)) {
+         // Unsigned to signed: only need to clamp to max value of dType
+         int dTypeMax = (1 << (typeSizeof(i->dType) * 8 - 1)) - 1;
+         Value *maxValue = bld.mkOp2v(OP_MIN, i->sType, bld.getSSA(), i->getSrc(0), bld.loadImm(NULL, dTypeMax));
+         i->setSrc(0, maxValue);
+      }
+      if (isSignedIntType(i->sType) && isSignedIntType(i->dType)) {
+         // Signed to signed: additionnally clamp to min value of dType
+         int dTypeMin = -(1 << (typeSizeof(i->dType) * 8 - 1));
+         Value *minValue = bld.mkOp2v(OP_MAX, i->sType, bld.getSSA(), i->getSrc(0), bld.loadImm(NULL, dTypeMin));
+         i->setSrc(0, minValue);
+      } else if (!isSignedIntType(i->sType) && !isSignedIntType(i->dType)) {
+         // Unsigned to unsigned: additionally clamp to max value of dType
+         int dTypeMax = (1 << (typeSizeof(i->dType) * 8 - 1)) - 1;
+         Value *maxValue = bld.mkOp2v(OP_MIN, i->sType, bld.getSSA(), i->getSrc(0), bld.loadImm(NULL, dTypeMax));
+         i->setSrc(0, maxValue);
+      }
+   }
+
+   if (typeSizeof(i->dType) == 8) {
+      if (isSignedIntType(i->sType)) {
+         Value *high = bld.mkOp2v(OP_SHR, TYPE_S32, bld.getSSA(), i->getSrc(0), bld.loadImm(NULL, 31));
+         bld.mkOp2(OP_MERGE, i->dType, i->getDef(0), i->getSrc(0), high);
+      } else {
+         bld.mkOp2(OP_MERGE, i->dType, i->getDef(0), i->getSrc(0), bld.loadImm(NULL, 0));
+      }
+   } else if (typeSizeof(i->sType) == 8) {
+      Instruction *insn = bld.mkOp1(OP_SPLIT, i->dType, i->getDef(0), i->getSrc(0));
+      Value *high = bld.getSSA();
+      insn->setDef(1, high);
+   }
+
+   delete_Instruction(prog, i);
+   return true;
+}
+
 // Generate a binary predicate if an instruction is predicated by
 // e.g. an f32 value.
 void
@@ -2853,6 +2901,8 @@ NVC0LoweringPass::visit(Instruction *i)
       checkPredicate(i);
 
    switch (i->op) {
+   case OP_CVT:
+      return handleCVT(i);
    case OP_TEX:
    case OP_TXB:
    case OP_TXL:
