@@ -94,6 +94,7 @@ struct nv50_ir_prog_info
       uint32_t instructions;
       uint8_t sourceRep;  /* PIPE_SHADER_IR_* */
       const void *source;
+      unsigned sourceLength;
       void *relocData;
       void *fixupData;
       struct nv50_ir_prog_symbol *syms;

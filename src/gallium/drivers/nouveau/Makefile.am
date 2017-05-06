@@ -27,9 +27,13 @@ AM_CPPFLAGS = \
 	-I$(top_srcdir)/include/drm-uapi \
 	$(GALLIUM_DRIVER_CFLAGS) \
 	$(LIBDRM_CFLAGS) \
-	$(NOUVEAU_CFLAGS)
+	$(NOUVEAU_CFLAGS) \
+	$(SPIRV_TOOLS_CFLAGS)
 
 noinst_LTLIBRARIES = libnouveau.la
+
+libnouveau_la_CXXFLAGS = \
+	-std=c++11
 
 libnouveau_la_SOURCES = \
 	$(C_SOURCES) \
@@ -38,6 +42,9 @@ libnouveau_la_SOURCES = \
 	$(NV50_C_SOURCES) \
 	$(NVC0_CODEGEN_SOURCES) \
 	$(NVC0_C_SOURCES)
+
+libnouveau_la_LDFLAGS = \
+	$(SPIRV_TOOLS_LIBS)
 
 noinst_PROGRAMS = nouveau_compiler
 

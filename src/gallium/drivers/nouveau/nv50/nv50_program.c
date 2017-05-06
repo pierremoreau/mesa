@@ -333,8 +333,15 @@ nv50_program_translate(struct nv50_program *prog, uint16_t chipset,
 
    info->type = prog->type;
    info->target = chipset;
-   info->bin.sourceRep = PIPE_SHADER_IR_TGSI;
-   info->bin.source = (void *)prog->pipe.tokens;
+
+   if (prog->cp.spirv != NULL) {
+      info->bin.sourceRep = PIPE_SHADER_IR_SPIRV;
+      info->bin.source = prog->cp.spirv;
+      info->bin.sourceLength = prog->cp.num_bytes;
+   } else {
+      info->bin.sourceRep = PIPE_SHADER_IR_TGSI;
+      info->bin.source = (void *)prog->pipe.tokens;
+   }
 
    info->bin.smemSize = prog->cp.smem_size;
    info->io.auxCBSlot = 15;

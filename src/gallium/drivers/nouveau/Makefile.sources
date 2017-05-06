@@ -116,6 +116,7 @@ NV50_CODEGEN_SOURCES := \
 	codegen/nv50_ir_driver.h \
 	codegen/nv50_ir_emit_nv50.cpp \
 	codegen/nv50_ir_from_tgsi.cpp \
+	codegen/nv_ir_from_spirv.cpp \
 	codegen/nv50_ir_graph.cpp \
 	codegen/nv50_ir_graph.h \
 	codegen/nv50_ir.h \
