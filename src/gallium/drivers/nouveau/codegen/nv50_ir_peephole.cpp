@@ -493,6 +493,17 @@ Modifier::applyTo(ImmediateValue& imm) const
       assert(!(bits & NV50_IR_MOD_NOT));
       break;
 
+   case TYPE_U64:
+   case TYPE_S64:
+      if (bits & NV50_IR_MOD_ABS)
+         imm.reg.data.s64 = (imm.reg.data.s64 >= 0) ?
+            imm.reg.data.s64 : -imm.reg.data.s64;
+      if (bits & NV50_IR_MOD_NEG)
+         imm.reg.data.s64 = -imm.reg.data.s64;
+      if (bits & NV50_IR_MOD_NOT)
+         imm.reg.data.s64 = ~imm.reg.data.s64;
+      break;
+
    default:
       assert(!"invalid/unhandled type");
       imm.reg.data.u64 = 0;
@@ -540,6 +551,8 @@ ConstantFolding::expr(Instruction *i,
          res.data.f32 = a->data.f32 * b->data.f32 * exp2f(i->postFactor);
          break;
       case TYPE_F64: res.data.f64 = a->data.f64 * b->data.f64; break;
+      case TYPE_S64: res.data.s64 = a->data.s64 * b->data.s64; break;
+      case TYPE_U64: res.data.u64 = a->data.u64 * b->data.u64; break;
       case TYPE_S32:
          if (i->subOp == NV50_IR_SUBOP_MUL_HIGH) {
             res.data.s32 = ((int64_t)a->data.s32 * b->data.s32) >> 32;
@@ -564,6 +577,8 @@ ConstantFolding::expr(Instruction *i,
       case TYPE_F64: res.data.f64 = a->data.f64 / b->data.f64; break;
       case TYPE_S32: res.data.s32 = a->data.s32 / b->data.s32; break;
       case TYPE_U32: res.data.u32 = a->data.u32 / b->data.u32; break;
+      case TYPE_S64: res.data.s64 = a->data.s64 / b->data.s64; break;
+      case TYPE_U64: res.data.u64 = a->data.u64 / b->data.u64; break;
       default:
          return;
       }
@@ -574,6 +589,8 @@ ConstantFolding::expr(Instruction *i,
       case TYPE_F64: res.data.f64 = a->data.f64 + b->data.f64; break;
       case TYPE_S32:
       case TYPE_U32: res.data.u32 = a->data.u32 + b->data.u32; break;
+      case TYPE_S64:
+      case TYPE_U64: res.data.u64 = a->data.u64 + b->data.u64; break;
       default:
          return;
       }
@@ -584,6 +601,8 @@ ConstantFolding::expr(Instruction *i,
       case TYPE_F64: res.data.f64 = a->data.f64 - b->data.f64; break;
       case TYPE_S32:
       case TYPE_U32: res.data.u32 = a->data.u32 - b->data.u32; break;
+      case TYPE_S64:
+      case TYPE_U64: res.data.u64 = a->data.u64 - b->data.u64; break;
       default:
          return;
       }
@@ -602,6 +621,8 @@ ConstantFolding::expr(Instruction *i,
       case TYPE_F64: res.data.f64 = MAX2(a->data.f64, b->data.f64); break;
       case TYPE_S32: res.data.s32 = MAX2(a->data.s32, b->data.s32); break;
       case TYPE_U32: res.data.u32 = MAX2(a->data.u32, b->data.u32); break;
+      case TYPE_S64: res.data.s64 = MAX2(a->data.s64, b->data.s64); break;
+      case TYPE_U64: res.data.u64 = MAX2(a->data.u64, b->data.u64); break;
       default:
          return;
       }
@@ -612,6 +633,8 @@ ConstantFolding::expr(Instruction *i,
       case TYPE_F64: res.data.f64 = MIN2(a->data.f64, b->data.f64); break;
       case TYPE_S32: res.data.s32 = MIN2(a->data.s32, b->data.s32); break;
       case TYPE_U32: res.data.u32 = MIN2(a->data.u32, b->data.u32); break;
+      case TYPE_S64: res.data.s64 = MIN2(a->data.s64, b->data.s64); break;
+      case TYPE_U64: res.data.u64 = MIN2(a->data.u64, b->data.u64); break;
       default:
          return;
       }
@@ -626,12 +649,17 @@ ConstantFolding::expr(Instruction *i,
       res.data.u64 = a->data.u64 ^ b->data.u64;
       break;
    case OP_SHL:
-      res.data.u32 = a->data.u32 << b->data.u32;
+      switch (typeSizeof(i->dType)) {
+      case 8:  res.data.u64 = a->data.u64 << b->data.u64; break;
+      default: res.data.u32 = a->data.u32 << b->data.u32; break;
+      }
       break;
    case OP_SHR:
       switch (i->dType) {
       case TYPE_S32: res.data.s32 = a->data.s32 >> b->data.u32; break;
       case TYPE_U32: res.data.u32 = a->data.u32 >> b->data.u32; break;
+      case TYPE_S64: res.data.s64 = a->data.s64 >> b->data.u64; break;
+      case TYPE_U64: res.data.u64 = a->data.u64 >> b->data.u64; break;
       default:
          return;
       }
@@ -667,7 +695,10 @@ ConstantFolding::expr(Instruction *i,
       break;
    }
    case OP_POPCNT:
-      res.data.u32 = util_bitcount(a->data.u32 & b->data.u32);
+      switch (typeSizeof(i->dType)) {
+      case 8:  res.data.u64 = util_bitcount(a->data.u64 & b->data.u64); break;
+      default: res.data.u32 = util_bitcount(a->data.u32 & b->data.u32); break;
+      }
       break;
    case OP_PFETCH:
       // The two arguments to pfetch are logically added together. Normally
@@ -763,6 +794,12 @@ ConstantFolding::expr(Instruction *i,
          break;
       case TYPE_F64:
          res.data.f64 = a->data.f64 * b->data.f64 + c->data.f64;
+         break;
+      case TYPE_S64:
+         res.data.s64 = a->data.s64 * b->data.s64 + c->data.s64;
+         break;
+      case TYPE_U64:
+         res.data.u64 = a->data.u64 * b->data.u64 + c->data.u64;
          break;
       case TYPE_S32:
          if (i->subOp == NV50_IR_SUBOP_MUL_HIGH) {
