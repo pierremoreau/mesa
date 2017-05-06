@@ -834,17 +834,22 @@ nv50_cp_state_create(struct pipe_context *pipe,
                      const struct pipe_compute_state *cso)
 {
    struct nv50_program *prog;
+   const struct pipe_llvm_program_header *header;
 
    prog = CALLOC_STRUCT(nv50_program);
    if (!prog)
       return NULL;
    prog->type = PIPE_SHADER_COMPUTE;
 
+   header = cso->prog;
+
    prog->cp.smem_size = cso->req_local_mem;
    prog->cp.lmem_size = cso->req_private_mem;
    prog->parm_size = cso->req_input_mem;
-
-   prog->pipe.tokens = tgsi_dup_tokens((const struct tgsi_token *)cso->prog);
+   prog->cp.num_bytes = header->num_bytes;
+   prog->cp.spirv = malloc(prog->cp.num_bytes);
+   memcpy(prog->cp.spirv, cso->prog + sizeof(struct pipe_llvm_program_header),
+          prog->cp.num_bytes);
 
    return (void *)prog;
 }

@@ -353,9 +353,9 @@ nvc0_screen_get_shader_param(struct pipe_screen *pscreen,
 
    switch (param) {
    case PIPE_SHADER_CAP_PREFERRED_IR:
-      return PIPE_SHADER_IR_TGSI;
+      return PIPE_SHADER_IR_SPIRV;
    case PIPE_SHADER_CAP_SUPPORTED_IRS:
-      return 1 << PIPE_SHADER_IR_TGSI;
+      return (1 << PIPE_SHADER_IR_TGSI) | (1 << PIPE_SHADER_IR_SPIRV);
    case PIPE_SHADER_CAP_MAX_INSTRUCTIONS:
    case PIPE_SHADER_CAP_MAX_ALU_INSTRUCTIONS:
    case PIPE_SHADER_CAP_MAX_TEX_INSTRUCTIONS:
@@ -476,6 +476,15 @@ nvc0_screen_get_compute_param(struct pipe_screen *pscreen,
 } while (0)
 
    switch (param) {
+   case PIPE_COMPUTE_CAP_IR_TARGET: {
+         const char *target = "spir64";
+         const char *arch = "unknown-unknown";
+         if (data) {
+            sprintf(data, "-%s-%s", target, arch);
+         }
+         /* +3 for dash and terminating NIL byte */
+         return (strlen(target) + strlen(arch) + 3) * sizeof(char);
+      }
    case PIPE_COMPUTE_CAP_GRID_DIMENSION:
       RET((uint64_t []) { 3 });
    case PIPE_COMPUTE_CAP_MAX_GRID_SIZE:
@@ -517,7 +526,7 @@ nvc0_screen_get_compute_param(struct pipe_screen *pscreen,
    case PIPE_COMPUTE_CAP_MAX_MEM_ALLOC_SIZE:
       RET((uint64_t []) { 1ULL << 40 });
    case PIPE_COMPUTE_CAP_IMAGES_SUPPORTED:
-      RET((uint32_t []) { 0 });
+      RET((uint32_t []) { 1 });
    case PIPE_COMPUTE_CAP_MAX_COMPUTE_UNITS:
       RET((uint32_t []) { screen->mp_count_compute });
    case PIPE_COMPUTE_CAP_MAX_CLOCK_FREQUENCY:

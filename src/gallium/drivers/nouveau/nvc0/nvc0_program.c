@@ -568,8 +568,15 @@ nvc0_program_translate(struct nvc0_program *prog, uint16_t chipset,
 
    info->type = prog->type;
    info->target = chipset;
-   info->bin.sourceRep = PIPE_SHADER_IR_TGSI;
-   info->bin.source = (void *)prog->pipe.tokens;
+
+   if (prog->cp.spirv != NULL) {
+      info->bin.sourceRep = PIPE_SHADER_IR_SPIRV;
+      info->bin.source = prog->cp.spirv;
+      info->bin.sourceLength = prog->cp.num_bytes;
+   } else {
+      info->bin.sourceRep = PIPE_SHADER_IR_TGSI;
+      info->bin.source = (void *)prog->pipe.tokens;
+   }
 
 #ifdef DEBUG
    info->target = debug_get_num_option("NV50_PROG_CHIPSET", chipset);

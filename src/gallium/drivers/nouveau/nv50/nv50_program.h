@@ -106,6 +106,8 @@ struct nv50_program {
       uint32_t smem_size; /* shared memory (TGSI LOCAL resource) size */
       void *syms;
       unsigned num_syms;
+      void *spirv;
+      unsigned num_bytes;
    } cp;
 
    bool mul_zero_wins;

@@ -20,6 +20,7 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
+#include <stdio.h>
 #include <errno.h>
 #include <xf86drm.h>
 #include <nouveau_drm.h>
@@ -312,8 +313,8 @@ nv50_screen_get_shader_param(struct pipe_screen *pscreen,
    case PIPE_SHADER_VERTEX:
    case PIPE_SHADER_GEOMETRY:
    case PIPE_SHADER_FRAGMENT:
-      break;
    case PIPE_SHADER_COMPUTE:
+      break;
    default:
       return 0;
    }
@@ -361,7 +362,9 @@ nv50_screen_get_shader_param(struct pipe_screen *pscreen,
    case PIPE_SHADER_CAP_MAX_SAMPLER_VIEWS:
       return MIN2(16, PIPE_MAX_SAMPLERS);
    case PIPE_SHADER_CAP_PREFERRED_IR:
-      return PIPE_SHADER_IR_TGSI;
+      return PIPE_SHADER_IR_SPIRV;
+   case PIPE_SHADER_CAP_SUPPORTED_IRS:
+      return (1 << PIPE_SHADER_IR_TGSI) | (1 << PIPE_SHADER_IR_SPIRV);
    case PIPE_SHADER_CAP_MAX_UNROLL_ITERATIONS_HINT:
       return 32;
    case PIPE_SHADER_CAP_TGSI_DROUND_SUPPORTED:
@@ -370,7 +373,6 @@ nv50_screen_get_shader_param(struct pipe_screen *pscreen,
    case PIPE_SHADER_CAP_TGSI_FMA_SUPPORTED:
    case PIPE_SHADER_CAP_TGSI_ANY_INOUT_DECL_RANGE:
    case PIPE_SHADER_CAP_MAX_SHADER_BUFFERS:
-   case PIPE_SHADER_CAP_SUPPORTED_IRS:
    case PIPE_SHADER_CAP_MAX_SHADER_IMAGES:
    case PIPE_SHADER_CAP_LOWER_IF_THRESHOLD:
    case PIPE_SHADER_CAP_MAX_HW_ATOMIC_COUNTERS:
@@ -422,6 +424,15 @@ nv50_screen_get_compute_param(struct pipe_screen *pscreen,
 } while (0)
 
    switch (param) {
+   case PIPE_COMPUTE_CAP_IR_TARGET: {
+         const char *target = "spir";
+         const char *arch = "unknown-unknown";
+         if (data) {
+            sprintf(data, "-%s-%s", target, arch);
+         }
+         /* +3 for dash and terminating NIL byte */
+         return (strlen(target) + strlen(arch) + 3) * sizeof(char);
+      }
    case PIPE_COMPUTE_CAP_GRID_DIMENSION:
       RET((uint64_t []) { 2 });
    case PIPE_COMPUTE_CAP_MAX_GRID_SIZE:
@@ -443,7 +454,7 @@ nv50_screen_get_compute_param(struct pipe_screen *pscreen,
    case PIPE_COMPUTE_CAP_MAX_MEM_ALLOC_SIZE:
       RET((uint64_t []) { 1ULL << 40 });
    case PIPE_COMPUTE_CAP_IMAGES_SUPPORTED:
-      RET((uint32_t []) { 0 });
+      RET((uint32_t []) { 1 });
    case PIPE_COMPUTE_CAP_MAX_COMPUTE_UNITS:
       RET((uint32_t []) { screen->mp_count });
    case PIPE_COMPUTE_CAP_MAX_CLOCK_FREQUENCY:

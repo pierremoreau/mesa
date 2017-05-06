@@ -102,6 +102,50 @@ dummy_assign_slots(struct nv50_ir_prog_info *info)
 }
 
 static int
+nouveau_codegen_spirv(int chipset, const unsigned char *binary,
+                      unsigned binarySize, unsigned *size, unsigned **code) {
+   struct nv50_ir_prog_info info = {0};
+   int ret;
+
+   info.type = PIPE_SHADER_COMPUTE;
+   info.target = chipset;
+   info.bin.sourceRep = PIPE_SHADER_IR_SPIRV;
+   info.bin.source = (const void *)binary;
+   info.bin.sourceLength = binarySize;
+   if (chipset < 0xc0)
+      info.prop.cp.inputOffset = 0x20;
+   else
+      info.prop.cp.inputOffset = 0x0;
+
+   info.io.auxCBSlot = 15;
+   info.io.ucpBase = NV50_CB_AUX_UCP_OFFSET;
+   info.io.suInfoBase = NV50_CB_AUX_TEX_MS_OFFSET;
+   info.io.msInfoCBSlot = 15;
+   info.io.msInfoBase = NV50_CB_AUX_MS_OFFSET;
+
+   if (chipset >= NVISA_GK104_CHIPSET) {
+      info.io.auxCBSlot = 7;
+      info.io.msInfoCBSlot = 7;
+   }
+   info.prop.cp.gridInfoBase = 0x100;
+
+   info.assignSlots = dummy_assign_slots;
+
+   info.optLevel = debug_get_num_option("NV50_PROG_OPTIMIZE", 3);
+   info.dbgFlags = debug_get_num_option("NV50_PROG_DEBUG", 0);
+
+   ret = nv50_ir_generate_code(&info);
+   if (ret) {
+      _debug_printf("Error compiling program: %d\n", ret);
+      return ret;
+   }
+
+   *size = info.bin.codeSize;
+   *code = info.bin.code;
+   return 0;
+}
+
+static int
 nouveau_codegen(int chipset, int type, struct tgsi_token tokens[],
                 unsigned *size, unsigned **code) {
    struct nv50_ir_prog_info info = {0};
@@ -143,7 +187,8 @@ main(int argc, char *argv[])
    const char *filename = NULL;
    FILE *f;
    char text[65536] = {0};
-   unsigned size = 0, *code = NULL;
+   unsigned size = 0, *code = NULL, textLength = 0u;
+   bool isSpirv = false;
 
    for (i = 1; i < argc; i++) {
       if (!strcmp(argv[i], "-a"))
@@ -161,9 +206,13 @@ main(int argc, char *argv[])
       _debug_printf("Must specify a filename\n");
       return 1;
    }
+   if (strstr(filename, ".spv"))
+      isSpirv = true;
 
    if (!strcmp(filename, "-"))
       f = stdin;
+   else if (isSpirv)
+      f = fopen(filename, "rb");
    else
       f = fopen(filename, "r");
 
@@ -172,7 +221,8 @@ main(int argc, char *argv[])
       return 1;
    }
 
-   if (!fread(text, 1, sizeof(text), f) || ferror(f)) {
+   textLength = fread(text, 1, sizeof(text), f);
+   if (!textLength || ferror(f)) {
       _debug_printf("Error reading file '%s'\n", filename);
       fclose(f);
       return 1;
@@ -181,35 +231,44 @@ main(int argc, char *argv[])
 
    _debug_printf("Compiling for NV%X\n", chipset);
 
-   if (!strncmp(text, "FRAG", 4))
-      type = PIPE_SHADER_FRAGMENT;
-   else if (!strncmp(text, "VERT", 4))
-      type = PIPE_SHADER_VERTEX;
-   else if (!strncmp(text, "GEOM", 4))
-      type = PIPE_SHADER_GEOMETRY;
-   else if (!strncmp(text, "COMP", 4))
-      type = PIPE_SHADER_COMPUTE;
-   else if (!strncmp(text, "TESS_CTRL", 9))
-      type = PIPE_SHADER_TESS_CTRL;
-   else if (!strncmp(text, "TESS_EVAL", 9))
-      type = PIPE_SHADER_TESS_EVAL;
-   else {
-      _debug_printf("Unrecognized TGSI header\n");
-      return 1;
-   }
-
-   if (!tgsi_text_translate(text, tokens, ARRAY_SIZE(tokens))) {
-      _debug_printf("Failed to parse TGSI shader\n");
-      return 1;
-   }
-
-   if (chipset >= 0x50) {
-      i = nouveau_codegen(chipset, type, tokens, &size, &code);
-   } else if (chipset >= 0x30) {
-      i = nv30_codegen(chipset, type, tokens, &size, &code);
+   if (isSpirv) {
+      if (chipset >= 0x50) {
+         i = nouveau_codegen_spirv(chipset, (unsigned char*)text, textLength, &size, &code);
+      } else {
+         _debug_printf("chipset NV%02X not supported\n", chipset);
+         i = 1;
+      }
    } else {
-      _debug_printf("chipset NV%02X not supported\n", chipset);
-      i = 1;
+      if (!strncmp(text, "FRAG", 4))
+         type = PIPE_SHADER_FRAGMENT;
+      else if (!strncmp(text, "VERT", 4))
+         type = PIPE_SHADER_VERTEX;
+      else if (!strncmp(text, "GEOM", 4))
+         type = PIPE_SHADER_GEOMETRY;
+      else if (!strncmp(text, "COMP", 4))
+         type = PIPE_SHADER_COMPUTE;
+      else if (!strncmp(text, "TESS_CTRL", 9))
+         type = PIPE_SHADER_TESS_CTRL;
+      else if (!strncmp(text, "TESS_EVAL", 9))
+         type = PIPE_SHADER_TESS_EVAL;
+      else {
+         _debug_printf("Unrecognized TGSI header\n");
+         return 1;
+      }
+
+      if (!tgsi_text_translate(text, tokens, ARRAY_SIZE(tokens))) {
+         _debug_printf("Failed to parse TGSI shader\n");
+         return 1;
+      }
+
+      if (chipset >= 0x50) {
+         i = nouveau_codegen(chipset, type, tokens, &size, &code);
+      } else if (chipset >= 0x30) {
+         i = nv30_codegen(chipset, type, tokens, &size, &code);
+      } else {
+         _debug_printf("chipset NV%02X not supported\n", chipset);
+         i = 1;
+      }
    }
    if (i)
       return i;
