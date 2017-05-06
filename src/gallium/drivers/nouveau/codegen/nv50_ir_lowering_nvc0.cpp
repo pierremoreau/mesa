@@ -1581,33 +1581,36 @@ NVC0LoweringPass::handleATOM(Instruction *atom)
       else if (targ->getChipset() < NVISA_GM107_CHIPSET)
          handleSharedATOMNVE4(atom);
       return true;
+   case FILE_MEMORY_GLOBAL:
+      return true;
    default:
       assert(atom->src(0).getFile() == FILE_MEMORY_BUFFER);
-      base = loadBufInfo64(ind, atom->getSrc(0)->reg.fileIndex * 16);
+      base = ptr;
+//      base = loadBufInfo64(ind, atom->getSrc(0)->reg.fileIndex * 16);
       assert(base->reg.size == 8);
-      if (ptr)
-         base = bld.mkOp2v(OP_ADD, TYPE_U64, base, base, ptr);
+//      if (ptr)
+//         base = bld.mkOp2v(OP_ADD, TYPE_U64, base, base, ptr);
       assert(base->reg.size == 8);
       atom->setIndirect(0, 0, base);
       atom->getSrc(0)->reg.file = FILE_MEMORY_GLOBAL;
 
-      // Harden against out-of-bounds accesses
-      Value *offset = bld.loadImm(NULL, atom->getSrc(0)->reg.data.offset + typeSizeof(atom->sType));
-      Value *length = loadBufLength32(ind, atom->getSrc(0)->reg.fileIndex * 16);
-      Value *pred = new_LValue(func, FILE_PREDICATE);
-      if (ptr)
-         bld.mkOp2(OP_ADD, TYPE_U32, offset, offset, ptr);
-      bld.mkCmp(OP_SET, CC_GT, TYPE_U32, pred, TYPE_U32, offset, length);
-      atom->setPredicate(CC_NOT_P, pred);
-      if (atom->defExists(0)) {
-         Value *zero, *dst = atom->getDef(0);
-         atom->setDef(0, bld.getSSA());
-
-         bld.setPosition(atom, true);
-         bld.mkMov((zero = bld.getSSA()), bld.mkImm(0))
-            ->setPredicate(CC_P, pred);
-         bld.mkOp2(OP_UNION, TYPE_U32, dst, atom->getDef(0), zero);
-      }
+//      // Harden against out-of-bounds accesses
+//      Value *offset = bld.loadImm(NULL, atom->getSrc(0)->reg.data.offset + typeSizeof(atom->sType));
+//      Value *length = loadBufLength32(ind, atom->getSrc(0)->reg.fileIndex * 16);
+//      Value *pred = new_LValue(func, FILE_PREDICATE);
+//      if (ptr)
+//         bld.mkOp2(OP_ADD, TYPE_U32, offset, offset, ptr);
+//      bld.mkCmp(OP_SET, CC_GT, TYPE_U32, pred, TYPE_U32, offset, length);
+//      atom->setPredicate(CC_NOT_P, pred);
+//      if (atom->defExists(0)) {
+//         Value *zero, *dst = atom->getDef(0);
+//         atom->setDef(0, bld.getSSA());
+//
+//         bld.setPosition(atom, true);
+//         bld.mkMov((zero = bld.getSSA()), bld.mkImm(0))
+//            ->setPredicate(CC_P, pred);
+//         bld.mkOp2(OP_UNION, TYPE_U32, dst, atom->getDef(0), zero);
+//      }
 
       return true;
    }
