@@ -243,6 +243,9 @@ enum operation
 // Or put the type into operation and have a couple 1000 values in that enum.
 // This will have to do for now.
 // The bitfields are supposed to correspond to nve4 ISA.
+// For a: 0 -> 32-bit, 2 -> 24-bit, 4 -> 16-bit
+// For b: 2 -> 24-bit, 0,4 -> 16-bit
+// For c: 0,2 -> 32-bit, 4 -> 24-bit, 8 -> 16-bit
 #define NV50_IR_SUBOP_MADSP(a,b,c) (((c) << 8) | ((b) << 4) | (a))
 #define NV50_IR_SUBOP_V1(d,a,b)    (((d) << 10) | ((b) << 5) | (a) | 0x0000)
 #define NV50_IR_SUBOP_V2(d,a,b)    (((d) << 10) | ((b) << 5) | (a) | 0x4000)
