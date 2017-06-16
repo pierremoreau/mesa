@@ -2581,7 +2581,9 @@ MemoryOpt::combineLd(Record *rec, Instruction *ld)
    // existing record.
    lockStores(ld);
 
-   for (j = 0; sizeRc; sizeRc -= rec->insn->getDef(j)->reg.size, ++j);
+   for (j = 0; sizeRc > 0; sizeRc -= rec->insn->getDef(j)->reg.size, ++j);
+   if (sizeRc < 0)
+      return false;
 
    if (offLd < offRc) {
       int sz;
