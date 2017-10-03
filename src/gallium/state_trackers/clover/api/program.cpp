@@ -452,6 +452,13 @@ clGetProgramInfo(cl_program d_prog, cl_program_info param,
       buf.as_string() = prog.source();
       break;
 
+   case CL_PROGRAM_IL_KHR:
+      if (prog.has_il)
+         buf.as_vector<char>() = prog.il();
+      else if (r_size)
+         *r_size = 0u;
+      break;
+
    case CL_PROGRAM_BINARY_SIZES:
       buf.as_vector<size_t>() = map([&](const device &dev) {
             return prog.build(dev).binary.size();
