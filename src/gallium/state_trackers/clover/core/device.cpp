@@ -275,3 +275,9 @@ std::string
 device::device_clc_version() const {
     return "1.1";
 }
+
+bool
+device::supports_ir(enum pipe_shader_ir ir) const {
+   return pipe->get_shader_param(pipe, PIPE_SHADER_COMPUTE,
+                                 PIPE_SHADER_CAP_SUPPORTED_IRS) & (1 << ir);
+}
