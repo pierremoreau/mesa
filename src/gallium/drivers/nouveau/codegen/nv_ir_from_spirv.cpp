@@ -1799,6 +1799,18 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       break;
    case spv::Op::OpEntryPoint:
       return convertEntryPoint(numWords, firstWord);
+   // TODO(pmoreau): Properly handle the different execution modes
+   case spv::Op::OpExecutionMode:
+      if (numWords < 3u) {
+         _debug_printf("OpExecutionMode expects at least 3 operands but got %u\n", numWords);
+         return false;
+      }
+      {
+         const auto entryPointId = getWord<spv::Id>(firstWord);
+         const auto executionMode = getWord<spv::ExecutionMode>(firstWord + 1u);
+         _debug_printf("Ignoring unsupported execution mode %u for entry point %u\n", entryPointId, executionMode);
+      }
+      break;
    case spv::Op::OpSource:
       return true;
    case spv::Op::OpName:
