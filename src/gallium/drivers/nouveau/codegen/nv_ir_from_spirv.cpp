@@ -344,6 +344,11 @@ private:
       Symbol *sym = new_Symbol(prog, base_symbol->reg.file, base_symbol->reg.fileIndex);
       sym->reg.type = type;
       sym->reg.size = size;
+
+      // TODO(pmoreau): This is a hack to get the proper offset on Tesla
+      if (file == SpirvFile::INPUT)
+         offset += info->prop.cp.inputOffset;
+
       sym->setAddress(base_symbol, offset);
 
       return sym;
@@ -1338,7 +1343,13 @@ Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, Valu
    if (sym == nullptr)
       sym = createSymbol(dstFile, realValue->reg.type, realValue->reg.size, offset);
 
-   Instruction* insn = mkStore(OP_STORE, stTy, sym, ptr.indirect, realValue);
+   // TODO(pmoreau): This is a hack to get the proper offset on Tesla
+   Value *tmp = nullptr;
+   if (info->target >= 0xc0)
+      tmp = ptr.indirect;
+   else
+      tmp = mkOp2v(OP_ADD, ptr.indirect->reg.type, getScratch(ptr.indirect->reg.size), ptr.indirect, loadImm(NULL, offset));
+   Instruction* insn = mkStore(OP_STORE, stTy, sym, tmp, realValue);
    if (hasFlag(access, spv::MemoryAccessShift::Volatile))
       insn->fixed = 1;
 }
@@ -1732,7 +1743,9 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       {
          using Cap = spv::Capability;
          Cap capability = getWord<Cap>(firstWord);
-         if (info->target < 0xc0)
+         if (info->target < 0xc0) {
+            return true;
+
             if (capability == Cap::Tessellation || capability == Cap::Vector16 ||
                 capability == Cap::Float16Buffer || capability == Cap::Float16 ||
                 capability == Cap::Float64 || capability == Cap::Int64 ||
@@ -1742,6 +1755,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
                _debug_printf("Capability unsupported: %u\n", capability);
                return false;
             }
+         }
       }
       break;
    case spv::Op::OpExtInstImport:
