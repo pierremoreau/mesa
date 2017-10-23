@@ -642,6 +642,12 @@ nv50_gp_sampler_states_bind(struct pipe_context *pipe, unsigned nr, void **s)
 }
 
 static void
+nv50_cp_sampler_states_bind(struct pipe_context *pipe, unsigned nr, void **s)
+{
+   nv50_stage_sampler_states_bind(nv50_context(pipe), 3, nr, s);
+}
+
+static void
 nv50_bind_sampler_states(struct pipe_context *pipe,
                          enum pipe_shader_type shader, unsigned start,
                          unsigned num_samplers, void **samplers)
@@ -656,6 +662,9 @@ nv50_bind_sampler_states(struct pipe_context *pipe,
       break;
    case PIPE_SHADER_FRAGMENT:
       nv50_fp_sampler_states_bind(pipe, num_samplers, samplers);
+      break;
+   case PIPE_SHADER_COMPUTE:
+      nv50_cp_sampler_states_bind(pipe, num_samplers, samplers);
       break;
    default:
       assert(!"unexpected shader type");
@@ -736,6 +745,9 @@ nv50_set_sampler_views(struct pipe_context *pipe, enum pipe_shader_type shader,
       break;
    case PIPE_SHADER_FRAGMENT:
       nv50_stage_set_sampler_views(nv50_context(pipe), 2, nr, views);
+      break;
+   case PIPE_SHADER_COMPUTE:
+      nv50_stage_set_sampler_views(nv50_context(pipe), 3, nr, views);
       break;
    default:
       ;

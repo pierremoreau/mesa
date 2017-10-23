@@ -390,6 +390,7 @@ void nv50_validate_samplers(struct nv50_context *nv50)
    need_flush  = nv50_validate_tsc(nv50, 0);
    need_flush |= nv50_validate_tsc(nv50, 1);
    need_flush |= nv50_validate_tsc(nv50, 2);
+   need_flush |= nv50_validate_tsc(nv50, 3);
 
    if (need_flush) {
       BEGIN_NV04(nv50->base.pushbuf, NV50_3D(TSC_FLUSH), 1);

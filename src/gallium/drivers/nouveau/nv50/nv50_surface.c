@@ -840,8 +840,8 @@ struct nv50_blitctx
       struct nv50_program *vp;
       struct nv50_program *gp;
       struct nv50_program *fp;
-      unsigned num_textures[3];
-      unsigned num_samplers[3];
+      unsigned num_textures[4];
+      unsigned num_samplers[4];
       struct pipe_sampler_view *texture[2];
       struct nv50_tsc_entry *sampler[2];
       unsigned min_samples;
@@ -1256,7 +1256,7 @@ nv50_blitctx_pre_blit(struct nv50_blitctx *ctx,
       memcpy(nv50->window_rect.rect, info->window_rectangles,
              sizeof(struct pipe_scissor_state) * nv50->window_rect.rects);
 
-   for (s = 0; s < 3; ++s) {
+   for (s = 0; s < 4; ++s) {
       ctx->saved.num_textures[s] = nv50->num_textures[s];
       ctx->saved.num_samplers[s] = nv50->num_samplers[s];
    }
@@ -1310,7 +1310,7 @@ nv50_blitctx_post_blit(struct nv50_blitctx *blit)
    pipe_sampler_view_reference(&nv50->textures[2][0], NULL);
    pipe_sampler_view_reference(&nv50->textures[2][1], NULL);
 
-   for (s = 0; s < 3; ++s) {
+   for (s = 0; s < 4; ++s) {
       nv50->num_textures[s] = blit->saved.num_textures[s];
       nv50->num_samplers[s] = blit->saved.num_samplers[s];
    }
