@@ -151,11 +151,11 @@ struct nv50_context {
    uint32_t instance_off; /* base vertex for instanced arrays */
    uint32_t instance_max; /* max instance for current draw call */
 
-   struct pipe_sampler_view *textures[3][PIPE_MAX_SAMPLERS];
-   unsigned num_textures[3];
-   uint32_t textures_coherent[3];
-   struct nv50_tsc_entry *samplers[3][PIPE_MAX_SAMPLERS];
-   unsigned num_samplers[3];
+   struct pipe_sampler_view *textures[4][PIPE_MAX_SAMPLERS];
+   unsigned num_textures[4];
+   uint32_t textures_coherent[4];
+   struct nv50_tsc_entry *samplers[4][PIPE_MAX_SAMPLERS];
+   unsigned num_samplers[4];
    bool seamless_cube_map;
 
    uint8_t num_so_targets;

@@ -49,8 +49,8 @@ struct nv50_graph_state {
    bool new_tls_space;
    uint8_t num_vtxbufs;
    uint8_t num_vtxelts;
-   uint8_t num_textures[3];
-   uint8_t num_samplers[3];
+   uint8_t num_textures[4];
+   uint8_t num_samplers[4];
    uint8_t prim_size;
    uint16_t scissor;
    bool seamless_cube_map;
