@@ -1469,14 +1469,16 @@ Converter::getStorageFile(spv::StorageClass storage)
    case spv::StorageClass::UniformConstant:
       return SpirvFile::CONST;
    case spv::StorageClass::Input:
-      return SpirvFile::INPUT; // XXX
+      return SpirvFile::INPUT;
    case spv::StorageClass::Workgroup:
       return SpirvFile::SHARED;
-   case spv::StorageClass::CrossWorkgroup: // FALLTHROUGH
-   case spv::StorageClass::Private:
+   case spv::StorageClass::CrossWorkgroup:
       return SpirvFile::GLOBAL;
    case spv::StorageClass::Function:
       return SpirvFile::TEMPORARY;
+   case spv::StorageClass::Generic: // FALLTHROUGH
+   case spv::StorageClass::AtomicCounter: // FALLTHROUGH
+   case spv::StorageClass::Image: // FALLTHROUGH
    default:
       _debug_printf("StorageClass %u isn't supported yet\n");
       assert(false);
