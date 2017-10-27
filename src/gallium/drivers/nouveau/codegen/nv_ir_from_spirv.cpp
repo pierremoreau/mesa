@@ -1225,7 +1225,12 @@ Converter::acquire(SpirvFile file, spv::Id id, Type const* type)
    return res;
 }
 
-// TODO coalescing should occur on alignment size
+// TODO(pmoreau):
+// * Should the coalescing from 8-bit to 32-bit be done in common code instead?
+// * Clean up everything
+// * Make sure to handle all alignment/padding/weird cases properly
+// * Handle all different MemoryAccess
+// * Handle loads from one memory space to another one?
 unsigned
 Converter::load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& ptr, unsigned int offset, Type const* type, spv::MemoryAccessMask access, uint32_t alignment)
 {
