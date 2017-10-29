@@ -33,6 +33,7 @@
 #include "codegen/nv50_ir_util.h"
 #include "codegen/nv50_ir_build_util.h"
 
+#include "OpenCL.std.h"
 #include "spirv.hpp11"
 
 namespace spirv {
@@ -360,7 +361,7 @@ private:
    nv50_ir::operation convertOp(spv::Op op);
    nv50_ir::CondCode convertCc(spv::Op op);
    spv_result_t loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiterals, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone);
-   spv_result_t convertOpenCLInstruction(spv::Id resId, Type const* type, uint32_t op, const spv_parsed_instruction_t *parsedInstruction);
+   spv_result_t convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::Entrypoints op, const spv_parsed_instruction_t *parsedInstruction);
    int getSubOp(spv::Op opcode) const;
    static enum SpirvFile getStorageFile(spv::StorageClass storage);
    static unsigned int getFirstBasicElementSize(Type const* type);
@@ -1712,7 +1713,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             _debug_printf("Couldn't find type used by OpExInst\n");
             return SPV_ERROR_INVALID_ID;
          }
-         auto const op = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
+         auto const op = spirv::getOperand<OpenCLLIB::Entrypoints>(parsedInstruction, 3u);
 
          switch (parsedInstruction->ext_inst_type) {
          case SPV_EXT_INST_TYPE_OPENCL_STD:
@@ -3657,7 +3658,7 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
 }
 
 spv_result_t
-Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, uint32_t op, const spv_parsed_instruction_t *parsedInstruction)
+Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::Entrypoints op, const spv_parsed_instruction_t *parsedInstruction)
 {
    auto getOp = [&](spv::Id id, unsigned c = 0u){
       auto searchOp = spvValues.find(id);
@@ -3680,14 +3681,14 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, uint32_t op
    };
 
    switch (op) {
-   case 167:
-   case 168:
+   case OpenCLLIB::SMad24:
+   case OpenCLLIB::UMad24:
       {
          auto op1 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 4u), 0u);
          auto op2 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 5u), 0u);
          auto op3 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 6u), 0u);
          auto res = getScratch();
-         mkOp3(OP_MADSP, type->getEnumType(op == 167), res, op1, op2, op3)->subOp = NV50_IR_SUBOP_MADSP(2, 2, 0); // u24 u24 u32
+         mkOp3(OP_MADSP, type->getEnumType(op == OpenCLLIB::SMad24), res, op1, op2, op3)->subOp = NV50_IR_SUBOP_MADSP(2, 2, 0); // i24 i24 i32
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, { res }, type->getPaddings() });
          return SPV_SUCCESS;
       }
