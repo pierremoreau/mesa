@@ -27,6 +27,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <spirv-tools/libspirv.h>
+
 #include "codegen/nv50_ir.h"
 #include "codegen/nv50_ir_util.h"
 #include "codegen/nv50_ir_build_util.h"
@@ -48,10 +50,29 @@ static inline bool hasFlag(spv::MemorySemanticsMask v, spv::MemorySemanticsShift
 static inline bool hasFlag(spv::MemoryAccessMask v, spv::MemoryAccessShift f) { return static_cast<uint32_t>(v) & (1u << static_cast<uint32_t>(f)); }
 static inline bool hasFlag(spv::KernelProfilingInfoMask v, spv::KernelProfilingInfoShift f) { return static_cast<uint32_t>(v) & (1u << static_cast<uint32_t>(f)); }
 
+// TODO(pmoreau): Use parsedOperand’s type to deduce the cast rather than
+//                having to specify it.
 template<typename T>
-T getWord(const char *binary, unsigned word_offset)
+T getOperand(const spv_parsed_instruction_t *parsedInstruction, uint16_t operandIndex)
 {
-   return static_cast<T>(reinterpret_cast<const uint32_t*>(binary)[word_offset]);
+   assert(operandIndex < parsedInstruction->num_operands);
+
+   const spv_parsed_operand_t parsedOperand = parsedInstruction->operands[operandIndex];
+   T value;
+   std::memcpy(&value, parsedInstruction->words + parsedOperand.offset, parsedOperand.num_words * sizeof(word));
+
+   return value;
+}
+
+template<>
+const char* getOperand<const char*>(const spv_parsed_instruction_t *parsedInstruction, uint16_t operandIndex)
+{
+   assert(operandIndex < parsedInstruction->num_operands);
+
+   const spv_parsed_operand_t parsedOperand = parsedInstruction->operands[operandIndex];
+   assert(parsedOperand.type == SPV_OPERAND_TYPE_LITERAL_STRING);
+
+   return reinterpret_cast<const char*>(parsedInstruction->words + parsedOperand.offset);
 }
 
 } // namespace spirv
@@ -92,8 +113,7 @@ public:
       virtual bool isBasicType() const { return false; }
       virtual bool isCompooundType() const { return false; }
       virtual bool isVoidType() const { return false; }
-      virtual std::vector<ImmediateValue *> generateConstant(const Words &words,
-                                                             Converter &conv, unsigned int& position) const { assert(false); return std::vector<ImmediateValue *>(); }
+      virtual std::vector<ImmediateValue *> generateConstant(Converter &conv, const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const { assert(false); return std::vector<ImmediateValue *>(); }
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const = 0;
       virtual unsigned int getSize(void) const { assert(false); return 0u; }
       unsigned int getAlignment() const { return alignment; }
@@ -122,32 +142,27 @@ public:
    using ValueMap = std::unordered_map<spv::Id, SpirVValue>;
    class TypeVoid : public Type {
    public:
-      TypeVoid(unsigned int numWords, unsigned int firstWord,
-               const char *const binary, bool &didSucceed);
+      TypeVoid(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
       virtual ~TypeVoid() {}
       virtual bool isVoidType() const override { return true; }
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
    };
    class TypeBool : public Type {
    public:
-      TypeBool(unsigned int numWords, unsigned int firstWord,
-              const char *const binary, bool &didSucceed);
+      TypeBool(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
       virtual ~TypeBool() {}
       virtual bool isBasicType() const override { return true; }
-      virtual std::vector<ImmediateValue *> generateConstant(const Words &words,
-                                                             Converter &conv, unsigned int& position) const override;
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
       virtual unsigned int getSize(void) const override { return 1u; } // XXX no idea
       virtual enum DataType getEnumType(int isSigned = -1) const override;
    };
    class TypeInt : public Type {
    public:
-      TypeInt(unsigned int numWords, unsigned int firstWord,
-              const char *const binary, bool &didSucceed);
+      TypeInt(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
       virtual ~TypeInt() {}
       virtual bool isBasicType() const override { return true; }
-      virtual std::vector<ImmediateValue *> generateConstant(const Words &words,
-                                                             Converter &conv, unsigned int& position) const override;
+      virtual std::vector<ImmediateValue *> generateConstant(Converter &conv,
+                                                             const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const override;
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
       virtual unsigned int getSize(void) const override { return static_cast<uint32_t>(width) / 8u; }
       virtual enum DataType getEnumType(int isSigned = -1) const override;
@@ -158,12 +173,11 @@ public:
    };
    class TypeFloat : public Type {
    public:
-      TypeFloat(unsigned int numWords, unsigned int firstWord,
-                const char *const binary, bool &didSucceed);
+      TypeFloat(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
       virtual ~TypeFloat() {}
       virtual bool isBasicType() const override { return true; }
-      virtual std::vector<ImmediateValue *> generateConstant(const Words &words,
-                                                             Converter &conv, unsigned int& position) const override;
+      virtual std::vector<ImmediateValue *> generateConstant(Converter &conv,
+                                                             const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const override;
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
       virtual unsigned int getSize(void) const override { return static_cast<uint32_t>(width) / 8u; }
       virtual enum DataType getEnumType(int isSigned = -1) const override;
@@ -172,13 +186,12 @@ public:
    };
    class TypeStruct : public Type {
    public:
-      TypeStruct(unsigned int numWords, unsigned int firstWord,
-                 const char *const binary, bool &didSucceed, std::unordered_map<spv::Id, Type*> const& types,
+      TypeStruct(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed, std::unordered_map<spv::Id, Type*> const& types,
                  Decorations const& decorations);
       virtual ~TypeStruct() {}
       virtual bool isCompooundType() const override { return true; }
-      virtual std::vector<ImmediateValue *> generateConstant(const Words &words,
-                                                             Converter &conv, unsigned int& position) const override;
+      virtual std::vector<ImmediateValue *> generateConstant(Converter &conv,
+                                                             const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const override;
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
       virtual unsigned int getSize(void) const override { return size; }
       virtual enum DataType getEnumType(int isSigned = -1) const override;
@@ -197,12 +210,11 @@ public:
    };
    class TypeVector : public Type {
    public:
-      TypeVector(unsigned int numWords, unsigned int firstWord,
-                 const char *const binary, bool &didSucceed, std::unordered_map<spv::Id, Type*> const& types);
+      TypeVector(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed, std::unordered_map<spv::Id, Type*> const& types);
       virtual ~TypeVector() {}
       virtual bool isCompooundType() const override { return true; }
-      virtual std::vector<ImmediateValue *> generateConstant(const Words &words,
-                                                             Converter &conv, unsigned int& position) const override;
+      virtual std::vector<ImmediateValue *> generateConstant(Converter &conv,
+                                                             const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const override;
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
       virtual unsigned int getSize(void) const override;
       virtual enum DataType getEnumType(int isSigned = -1) const override;
@@ -221,8 +233,7 @@ public:
    };
    class TypeArray : public Type {
    public:
-      TypeArray(unsigned int numWords, unsigned int firstWord,
-                 const char *const binary, bool &didSucceed, std::unordered_map<spv::Id, Type*> const& types,
+      TypeArray(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed, std::unordered_map<spv::Id, Type*> const& types,
                  const ValueMap &m);
       virtual ~TypeArray() {}
       virtual bool isCompooundType() const override { return true; }
@@ -244,8 +255,7 @@ public:
    };
    class TypePointer : public Type {
    public:
-      TypePointer(unsigned int numWords, unsigned int firstWord,
-                  const char *const binary, bool &didSucceed, unsigned int psize,
+      TypePointer(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed, unsigned int psize,
                   std::unordered_map<spv::Id, Type*> const& types);
       virtual ~TypePointer() {}
       virtual bool isBasicType() const override { return true; }
@@ -263,8 +273,7 @@ public:
    };
    class TypeFunction : public Type {
    public:
-      TypeFunction(unsigned int numWords, unsigned int firstWord,
-                   const char *const binary, bool &didSucceed);
+      TypeFunction(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
       virtual ~TypeFunction() {}
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
 
@@ -273,8 +282,7 @@ public:
    };
    class TypeSampler : public Type {
    public:
-      TypeSampler(unsigned int numWords, unsigned int firstWord,
-                  const char *const binary, bool &didSucceed);
+      TypeSampler(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
       virtual ~TypeSampler() {}
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
 
@@ -282,8 +290,7 @@ public:
    };
    class TypeImage : public Type {
    public:
-      TypeImage(unsigned int numWords, unsigned int firstWord,
-                const char *const binary, bool &didSucceed);
+      TypeImage(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
       virtual ~TypeImage() {}
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
 
@@ -299,8 +306,7 @@ public:
    };
    class TypeSampledImage : public Type {
    public:
-      TypeSampledImage(unsigned int numWords, unsigned int firstWord,
-                       const char *const binary, bool &didSucceed);
+      TypeSampledImage(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
       virtual ~TypeSampledImage() {}
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
       spv::Id getImageType() const { return image_type; }
@@ -330,15 +336,13 @@ public:
    ~Converter();
 
    bool run();
+   spv_result_t convertInstruction(const spv_parsed_instruction_t *parsedInstruction);
 
 private:
-   bool convertInstruction(spv::Op opcode, unsigned int numWords,
-                           unsigned int firstWord);
-   bool convertEntryPoint(unsigned int numWords, unsigned int firstWord);
-   bool convertDecorate(unsigned int numWords, unsigned int firstWord,
-                        bool hasMember = false);
-   template<typename T> bool convertType(unsigned int numWords,
-                                         unsigned int firstWord);
+   spv_result_t convertEntryPoint(const spv_parsed_instruction_t *parsedInstruction);
+   spv_result_t convertDecorate(const spv_parsed_instruction_t *parsedInstruction,
+                                bool hasMember = false);
+   template<typename T> spv_result_t convertType(const spv_parsed_instruction_t *parsedInstruction);
    Symbol * createSymbol(SpirvFile file, DataType type, unsigned int size, unsigned int offset) {
       Symbol *base_symbol = baseSymbols[file];
       Symbol *sym = new_Symbol(prog, base_symbol->reg.file, base_symbol->reg.fileIndex);
@@ -355,8 +359,8 @@ private:
    }
    nv50_ir::operation convertOp(spv::Op op);
    nv50_ir::CondCode convertCc(spv::Op op);
-   bool loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiterals, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone);
-   bool convertOpenCLInstruction(spv::Id resId, Type const* type, uint32_t op, uint32_t firstWord, uint32_t numWords);
+   spv_result_t loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiterals, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone);
+   spv_result_t convertOpenCLInstruction(spv::Id resId, Type const* type, uint32_t op, const spv_parsed_instruction_t *parsedInstruction);
    int getSubOp(spv::Op opcode) const;
    static enum SpirvFile getStorageFile(spv::StorageClass storage);
    static unsigned int getFirstBasicElementSize(Type const* type);
@@ -369,8 +373,6 @@ private:
    unsigned load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& ptr, unsigned int offset, Type const* type, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone, uint32_t alignment = 0u);
    void store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, Value *value, DataType stTy, spv::MemoryAccessMask access, uint32_t alignment);
    void store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, std::vector<PValue> const& values, Type const* type, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone, uint32_t alignment = 0u);
-
-   template<typename T> T getWord(unsigned word_offset) { return spirv::getWord<T>(binary, word_offset); }
 
    struct nv50_ir_prog_info *info;
    const char *const binary;
@@ -491,37 +493,25 @@ GetOutOfSSA::handlePhi(Instruction *insn)
    return true;
 }
 
-Converter::TypeVoid::TypeVoid(unsigned int numWords, unsigned int firstWord,
-                              const char *const binary, bool &didSucceed) : Type(spv::Op::OpTypeVoid)
+template<typename T>
+static
+ImmediateValue* generateImmediate(Converter &conv, const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex)
 {
-   if (numWords != 2u) {
-      _debug_printf("OpTypeVoid expects 2 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
+   T value = spirv::getOperand<T>(parsedInstruction, operandIndex);
+   return conv.mkImm(value);
+}
 
-   id = spirv::getWord<spv::Id>(binary, firstWord);
+Converter::TypeVoid::TypeVoid(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeVoid)
+{
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    didSucceed = true;
 }
 
-Converter::TypeBool::TypeBool(unsigned int numWords, unsigned int firstWord,
-                                const char *const binary, bool &didSucceed) : Type(spv::Op::OpTypeBool)
+Converter::TypeBool::TypeBool(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeBool)
 {
-   if (numWords != 2u) {
-      _debug_printf("OpTypeBool expects 2 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    alignment = 1u;
    didSucceed = true;
-}
-
-std::vector<ImmediateValue *>
-Converter::TypeBool::generateConstant(const Words &words, Converter &conv, unsigned int& position) const
-{
-   return { conv.mkImm(words[position++]) }; // XXX unsure
 }
 
 std::vector<Value *>
@@ -536,43 +526,48 @@ Converter::TypeBool::getEnumType(int /*isSigned*/) const
    return DataType::TYPE_NONE;
 }
 
-Converter::TypeInt::TypeInt(unsigned int numWords, unsigned int firstWord,
-                                const char *const binary, bool &didSucceed) : Type(spv::Op::OpTypeInt)
+Converter::TypeInt::TypeInt(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeInt)
 {
-   if (numWords != 4u) {
-      _debug_printf("OpTypeInt expects 4 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
-   width = spirv::getWord<unsigned>(binary, firstWord + 1u);
-   signedness = spirv::getWord<unsigned>(binary, firstWord + 2u);
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+   width = spirv::getOperand<unsigned>(parsedInstruction, 1u);
+   signedness = spirv::getOperand<unsigned>(parsedInstruction, 2u);
    alignment = width / 8u;
    didSucceed = true;
 }
 
 std::vector<ImmediateValue *>
-Converter::TypeInt::generateConstant(const Words &words, Converter &conv, unsigned int& position) const
+Converter::TypeInt::generateConstant(Converter &conv, const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const
 {
-   if (words.size() > position + 2u) {
-      _debug_printf("Int values can't be more than 64-bits wide\n");
-      return std::vector<ImmediateValue *>();
-   }
-
    ImmediateValue *imm = nullptr;
-   if (width != 64u) {
-      imm = conv.mkImm(words[position]);
-      ++position;
-   } else {
-      imm = conv.mkImm((static_cast<unsigned long>(words[position + 1u]) << 32u) +
-                        static_cast<unsigned long>(words[position]));
-      position += 2u;
+   DataType type = getEnumType();
+   switch (type) {
+   case DataType::TYPE_S8: // FALLTHROUGH
+   case DataType::TYPE_U8:
+      imm = generateImmediate<uint8_t>(conv, parsedInstruction, operandIndex);
+      break;
+   case DataType::TYPE_S16: // FALLTHROUGH
+   case DataType::TYPE_U16:
+      imm = generateImmediate<uint16_t>(conv, parsedInstruction, operandIndex);
+      break;
+   case DataType::TYPE_S32: // FALLTHROUGH
+   case DataType::TYPE_U32:
+      imm = generateImmediate<uint32_t>(conv, parsedInstruction, operandIndex);
+      break;
+   case DataType::TYPE_S64: // FALLTHROUGH
+   case DataType::TYPE_U64:
+      imm = generateImmediate<uint64_t>(conv, parsedInstruction, operandIndex);
+      break;
+   default:
+      _debug_printf("Unsupported integer type.\n");
+      assert(false);
+      return { nullptr };
    }
-   imm->reg.type = getEnumType();
+   imm->reg.type = type;
+   ++operandIndex;
    return { imm };
 }
 
+// TODO(pmoreau): Might need to be fixed
 std::vector<Value *>
 Converter::TypeInt::generateNullConstant(Converter &conv) const
 {
@@ -614,40 +609,35 @@ Converter::TypeInt::getEnumType(int isSigned) const
    }
 }
 
-Converter::TypeFloat::TypeFloat(unsigned int numWords, unsigned int firstWord,
-                                const char *const binary, bool &didSucceed) : Type(spv::Op::OpTypeFloat)
+Converter::TypeFloat::TypeFloat(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeFloat)
 {
-   if (numWords != 3u) {
-      _debug_printf("OpTypeFloat expects 3 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
-   width = spirv::getWord<unsigned>(binary, firstWord + 1u);
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+   width = spirv::getOperand<unsigned>(parsedInstruction, 1u);
    alignment = width / 8u;
    didSucceed = true;
 }
 
 std::vector<ImmediateValue *>
-Converter::TypeFloat::generateConstant(const Words &words, Converter &conv, unsigned int& position) const
+Converter::TypeFloat::generateConstant(Converter &conv, const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const
 {
-   if (words.size() > position + 2u) {
-      _debug_printf("Floating point values can't be more than 64-bits wide\n");
-      return std::vector<ImmediateValue *>();
-   }
-
    ImmediateValue *imm = nullptr;
-   if (width != 64u) {
-      imm =  conv.mkImm(words[position]);
-      ++position;
-   } else {
-      imm = conv.mkImm((static_cast<unsigned long>(words[position + 1u]) << 32u) +
-                        static_cast<unsigned long>(words[position]));
-      position += 2u;
+   DataType type = getEnumType();
+   switch (type) {
+   case DataType::TYPE_F32:
+      imm = generateImmediate<float>(conv, parsedInstruction, operandIndex);
+      break;
+   case DataType::TYPE_F64:
+      imm = generateImmediate<double>(conv, parsedInstruction, operandIndex);
+      break;
+   default:
+      _debug_printf("Unsupported floating point type.\n");
+      assert(false);
+      return { nullptr };
    }
-   imm->reg.type = getEnumType();
+   imm->reg.type = type;
+   ++operandIndex;
    return { imm };
+
 }
 
 std::vector<Value *>
@@ -672,21 +662,14 @@ Converter::TypeFloat::getEnumType(int /*isSigned*/) const
    }
 }
 
-Converter::TypeStruct::TypeStruct(unsigned int numWords, unsigned int firstWord,
-                                  const char *const binary, bool &didSucceed,
+Converter::TypeStruct::TypeStruct(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed,
                                   std::unordered_map<spv::Id, Type*> const& types,
                                   std::unordered_map<spv::Id, Decoration> const& decorations) : Type(spv::Op::OpTypeStruct)
 {
-   if (numWords < 2u) {
-      _debug_printf("OpTypeStruct expects at least 2 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    size = 0u;
-   member_ids.reserve(numWords - 2u);
-   member_types.reserve(numWords - 2u);
+   member_ids.reserve(parsedInstruction->num_operands - 1u);
+   member_types.reserve(parsedInstruction->num_operands - 1u);
    auto largest_alignment = 0u;
 
    bool is_packed = false;
@@ -694,8 +677,8 @@ Converter::TypeStruct::TypeStruct(unsigned int numWords, unsigned int firstWord,
    if (decos != decorations.end())
       is_packed = decos->second.find(spv::Decoration::CPacked) != decos->second.end();
 
-   for (unsigned int i = 1u; i < numWords - 1u; ++i) {
-      const auto member_id = spirv::getWord<spv::Id>(binary, firstWord + i);
+   for (unsigned int i = 1u; i < parsedInstruction->num_operands; ++i) {
+      const auto member_id = spirv::getOperand<spv::Id>(parsedInstruction, i);
       auto search = types.find(member_id);
       if (search == types.end()) {
          _debug_printf("Couldn't find the type %u associated to TypeStruct %u\n", member_id, id);
@@ -726,11 +709,11 @@ Converter::TypeStruct::TypeStruct(unsigned int numWords, unsigned int firstWord,
 }
 
 std::vector<ImmediateValue *>
-Converter::TypeStruct::generateConstant(const Words &words, Converter &conv, unsigned int& position) const
+Converter::TypeStruct::generateConstant(Converter &conv, const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const
 {
    std::vector<ImmediateValue *> imms;
    for (const Type *member_type : member_types) {
-      const auto member_constant = member_type->generateConstant(words, conv, position);
+      const auto member_constant = member_type->generateConstant(conv, parsedInstruction, operandIndex);
       imms.insert(imms.end(), member_constant.begin(), member_constant.end());
    }
    return imms;
@@ -806,18 +789,11 @@ Converter::TypeStruct::getGlobalOffset(BuildUtil *bu, Decoration const& decorati
    }
 }
 
-Converter::TypeVector::TypeVector(unsigned int numWords, unsigned int firstWord,
-                                  const char *const binary, bool &didSucceed,
+Converter::TypeVector::TypeVector(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed,
                                   std::unordered_map<spv::Id, Type*> const& types) : Type(spv::Op::OpTypeVector)
 {
-   if (numWords != 4u) {
-      _debug_printf("OpTypeVector expects 4 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
-   component_type_id = spirv::getWord<spv::Id>(binary, firstWord + 1u);
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+   component_type_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
    auto search = types.find(component_type_id);
    if (search == types.end()) {
       _debug_printf("Couldn't find the type associated to TypeVector %u\n", id);
@@ -825,16 +801,17 @@ Converter::TypeVector::TypeVector(unsigned int numWords, unsigned int firstWord,
       return;
    }
    component_type = search->second;
-   elements_nb = spirv::getWord<unsigned>(binary, firstWord + 2u);
+   elements_nb = spirv::getOperand<unsigned>(parsedInstruction, 2u);
    alignment = component_type->getAlignment();
    didSucceed = true;
 }
 
+// TODO(pmoreau): check this one, this does not seem correct.
 std::vector<ImmediateValue *>
-Converter::TypeVector::generateConstant(const Words &words, Converter &conv, unsigned int& position) const
+Converter::TypeVector::generateConstant(Converter &conv, const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const
 {
    std::vector<ImmediateValue *> imms_constant;
-   const auto member_constant = component_type->generateConstant(words, conv, position);
+   const auto member_constant = component_type->generateConstant(conv, parsedInstruction, operandIndex);
    for (unsigned int i = 0u; i < elements_nb; ++i)
       imms_constant.insert(imms_constant.end(), member_constant.begin(), member_constant.end());
    return imms_constant;
@@ -920,19 +897,12 @@ Converter::TypeVector::getPaddings() const
    return paddings;
 }
 
-Converter::TypeArray::TypeArray(unsigned int numWords, unsigned int firstWord,
-                                  const char *const binary, bool &didSucceed,
-                                  std::unordered_map<spv::Id, Type*> const& types,
-                                  const ValueMap &m) : Type(spv::Op::OpTypeArray)
+Converter::TypeArray::TypeArray(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed,
+                                std::unordered_map<spv::Id, Type*> const& types,
+                                const ValueMap &m) : Type(spv::Op::OpTypeArray)
 {
-   if (numWords != 4u) {
-      _debug_printf("OpTypeArray expects 4 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
-   component_type_id = spirv::getWord<spv::Id>(binary, firstWord + 1u);
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+   component_type_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
    auto search = types.find(component_type_id);
    if (search == types.end()) {
       _debug_printf("Couldn't find the type associated to TypeArray %u\n", id);
@@ -940,7 +910,7 @@ Converter::TypeArray::TypeArray(unsigned int numWords, unsigned int firstWord,
       return;
    }
    component_type = search->second;
-   elements_nb_id = spirv::getWord<spv::Id>(binary, firstWord + 2u);
+   elements_nb_id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
    auto searchElemNb = m.find(elements_nb_id);
    assert(searchElemNb != m.end() && searchElemNb->second.storageFile == SpirvFile::IMMEDIATE);
    elements_nb = searchElemNb->second.value.front().value->asImm()->reg.data.u32;
@@ -1026,20 +996,13 @@ Converter::TypeArray::getPaddings() const
    return paddings;
 }
 
-Converter::TypePointer::TypePointer(unsigned int numWords, unsigned int firstWord,
-                                    const char *const binary, bool &didSucceed,
+Converter::TypePointer::TypePointer(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed,
                                     unsigned int psize,
                                     std::unordered_map<spv::Id, Type*> const& types) : Type(spv::Op::OpTypePointer)
 {
-   if (numWords != 4u) {
-      _debug_printf("OpTypePointer expects 4 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
-   storage = spirv::getWord<spv::StorageClass>(binary, firstWord + 1u);
-   type_id = spirv::getWord<spv::Id>(binary, firstWord + 2u);
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+   storage = spirv::getOperand<spv::StorageClass>(parsedInstruction, 1u);
+   type_id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
    auto search = types.find(type_id);
    if (search == types.end()) {
       _debug_printf("Couldn't find the type associated to TypePointer %u\n", id);
@@ -1098,71 +1061,43 @@ Converter::TypePointer::getGlobalOffset(BuildUtil *bu, Decoration const& decorat
       type->getGlobalOffset(bu, decoration, offset, ids, position + 1u);
 }
 
-Converter::TypeFunction::TypeFunction(unsigned int numWords, unsigned int firstWord,
-                                      const char *const binary, bool &didSucceed) : Type(spv::Op::OpTypeFunction)
+Converter::TypeFunction::TypeFunction(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeFunction)
 {
-   if (numWords < 3u) {
-      _debug_printf("OpTypeFunction expects at least 3 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
-   type = spirv::getWord<spv::Id>(binary, firstWord + 1u);
-   for (unsigned int i = 2u; i < numWords; ++i)
-      params.push_back(spirv::getWord<spv::Id>(binary, firstWord + i));
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+   type = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+   for (unsigned int i = 2u; i < parsedInstruction->num_operands; ++i)
+      params.push_back(spirv::getOperand<spv::Id>(parsedInstruction, i));
    alignment = 0u;
    didSucceed = true;
 }
 
-Converter::TypeSampler::TypeSampler(unsigned int numWords, unsigned int firstWord,
-                                    const char *const binary, bool &didSucceed) : Type(spv::Op::OpTypeSampler)
+Converter::TypeSampler::TypeSampler(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeSampler)
 {
-   if (numWords != 2u) {
-      _debug_printf("OpTypeSampler expects 2 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    alignment = 0u;
    didSucceed = true;
 }
 
-Converter::TypeSampledImage::TypeSampledImage(unsigned int numWords, unsigned int firstWord,
-                                              const char *const binary, bool &didSucceed) : Type(spv::Op::OpTypeSampledImage)
+Converter::TypeSampledImage::TypeSampledImage(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeSampledImage)
 {
-   if (numWords != 3u) {
-      _debug_printf("OpTypeSampledImage expects 3 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
-   image_type = spirv::getWord<spv::Id>(binary, firstWord + 1);
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+   image_type = spirv::getOperand<spv::Id>(parsedInstruction, 1);
    alignment = 0u;
    didSucceed = true;
 }
 
-Converter::TypeImage::TypeImage(unsigned int numWords, unsigned int firstWord,
-                                const char *const binary, bool &didSucceed) : Type(spv::Op::OpTypeImage)
+Converter::TypeImage::TypeImage(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeImage)
 {
-   if (numWords < 9u) {
-      _debug_printf("OpTypeImage expects at least 9 operands but got %u\n", numWords);
-      didSucceed = false;
-      return;
-   }
-
-   id = spirv::getWord<spv::Id>(binary, firstWord);
-   sampled_type = spirv::getWord<spv::Id>(binary, firstWord + 1u);
-   dim = spirv::getWord<spv::Dim>(binary, firstWord + 2u);
-   depth = spirv::getWord<unsigned>(binary, firstWord + 3u);
-   arrayed = spirv::getWord<unsigned>(binary, firstWord + 4u);
-   ms = spirv::getWord<unsigned>(binary, firstWord + 5u);
-   sampled = spirv::getWord<unsigned>(binary, firstWord + 6u);
-   format = spirv::getWord<spv::ImageFormat>(binary, firstWord + 7u);
-   if (numWords == 10)
-      access = spirv::getWord<spv::AccessQualifier>(binary, firstWord + 8u);
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+   sampled_type = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+   dim = spirv::getOperand<spv::Dim>(parsedInstruction, 2u);
+   depth = spirv::getOperand<unsigned>(parsedInstruction, 3u);
+   arrayed = spirv::getOperand<unsigned>(parsedInstruction, 4u);
+   ms = spirv::getOperand<unsigned>(parsedInstruction, 5u);
+   sampled = spirv::getOperand<unsigned>(parsedInstruction, 6u);
+   format = spirv::getOperand<spv::ImageFormat>(parsedInstruction, 7u);
+   if (parsedInstruction->num_operands == 9u)
+      access = spirv::getOperand<spv::AccessQualifier>(parsedInstruction, 8u);
    alignment = 0u;
    didSucceed = true;
 }
@@ -1504,6 +1439,12 @@ Converter::getFirstBasicElementEnumType(Type const* type)
    return currType->getEnumType();
 }
 
+static spv_result_t
+handleInstruction(void *userData, const spv_parsed_instruction_t *parsedInstruction)
+{
+   return reinterpret_cast<Converter*>(userData)->convertInstruction(parsedInstruction);
+}
+
 bool
 Converter::run()
 {
@@ -1515,24 +1456,22 @@ Converter::run()
    prog->main->setEntry(entry);
    prog->main->setExit(new BasicBlock(prog->main));
 
-   spv::Op opcode;
-   unsigned int numOperands = 0u, numWords = info->bin.sourceLength / 4u, i = 5u;
-   while (i < numWords) {
-      opcode = static_cast<spv::Op>(getWord<unsigned>(i) & spv::OpCodeMask);
-      numOperands = getWord<unsigned>(i) >> spv::WordCountShift;
+   const unsigned int numWords = info->bin.sourceLength / 4u;
 
-      if (i + (numOperands - 1u) >= numWords) {
-         _debug_printf("Opcode %u is missing some operands\n", opcode);
-         return false;
-      }
-      if (!convertInstruction(opcode, numOperands, i + 1u)) {
-         _debug_printf("Failed to convert opcode %u\n", opcode);
-         prog->print();
-         return false;
-      }
-
-      i += numOperands;
+   spv_context context = spvContextCreate(SPV_ENV_OPENCL_2_1);
+   spv_diagnostic diag = nullptr;
+   const spv_result_t res = spvBinaryParse(context, this,
+         reinterpret_cast<const uint32_t*>(binary), numWords,
+         nullptr, handleInstruction, &diag);
+   if (res != SPV_SUCCESS) {
+      _debug_printf("Failed to parse the SPIR-V binary:\n");
+      spvDiagnosticPrint(diag);
+      spvDiagnosticDestroy(diag);
+      spvContextDestroy(context);
+      return false;
    }
+   spvDiagnosticDestroy(diag);
+   spvContextDestroy(context);
 
    for (auto& i : functionsToMatch) {
       auto funcIter = functions.find(i.first);
@@ -1555,78 +1494,75 @@ Converter::run()
    return true;
 }
 
-template<typename T> bool
-Converter::convertType(unsigned int numWords, unsigned int firstWord)
+template<typename T> spv_result_t
+Converter::convertType(const spv_parsed_instruction_t *parsedInstruction)
 {
    bool didSucceed = false;
-   T *type = new T(numWords, firstWord, binary, didSucceed);
+   T *type = new T(parsedInstruction, didSucceed);
    if (!didSucceed) {
       delete type;
-      return false;
+      return SPV_ERROR_INTERNAL;
    }
    types.emplace(type->id, type);
 
-   return true;
+   return SPV_SUCCESS;
 }
 
-template<> bool
-Converter::convertType<Converter::TypeStruct>(unsigned int numWords, unsigned int firstWord)
+template<> spv_result_t
+Converter::convertType<Converter::TypeStruct>(const spv_parsed_instruction_t *parsedInstruction)
 {
    bool didSucceed = false;
-   auto *type = new TypeStruct(numWords, firstWord, binary, didSucceed,
-         types, decorations);
+   auto *type = new TypeStruct(parsedInstruction, didSucceed, types, decorations);
    if (!didSucceed) {
       delete type;
-      return false;
+      return SPV_ERROR_INTERNAL;
    }
    types.emplace(type->id, type);
 
-   return true;
+   return SPV_SUCCESS;
 }
 
-template<> bool
-Converter::convertType<Converter::TypeVector>(unsigned int numWords, unsigned int firstWord)
+template<> spv_result_t
+Converter::convertType<Converter::TypeVector>(const spv_parsed_instruction_t *parsedInstruction)
 {
    bool didSucceed = false;
-   auto *type = new TypeVector(numWords, firstWord, binary, didSucceed,
-         types);
+   auto *type = new TypeVector(parsedInstruction, didSucceed, types);
    if (!didSucceed) {
       delete type;
-      return false;
+      return SPV_ERROR_INTERNAL;
    }
    types.emplace(type->id, type);
 
-   return true;
+   return SPV_SUCCESS;
 }
 
-template<> bool
-Converter::convertType<Converter::TypeArray>(unsigned int numWords, unsigned int firstWord)
+template<> spv_result_t
+Converter::convertType<Converter::TypeArray>(const spv_parsed_instruction_t *parsedInstruction)
 {
    bool didSucceed = false;
-   auto *type = new TypeArray(numWords, firstWord, binary, didSucceed,
-         types, spvValues);
+   auto *type = new TypeArray(parsedInstruction, didSucceed, types, spvValues);
    if (!didSucceed) {
       delete type;
-      return false;
+      return SPV_ERROR_INTERNAL;
    }
    types.emplace(type->id, type);
 
-   return true;
+   return SPV_SUCCESS;
 }
 
-template<> bool
-Converter::convertType<Converter::TypePointer>(unsigned int numWords, unsigned int firstWord)
+template<> spv_result_t
+Converter::convertType<Converter::TypePointer>(const spv_parsed_instruction_t *parsedInstruction)
 {
    bool didSucceed = false;
-   auto *type = new TypePointer(numWords, firstWord, binary, didSucceed,
+   auto *type = new TypePointer(parsedInstruction, didSucceed,
          (info->target < 0xc0) ? 32u : 64u, types);
    if (!didSucceed) {
       delete type;
-      return false;
+      return SPV_ERROR_INTERNAL;
    }
    types.emplace(type->id, type);
 
-   return true;
+   return SPV_SUCCESS;
 }
 
 nv50_ir::operation
@@ -1697,9 +1633,8 @@ Converter::convertCc(spv::Op op)
    }
 }
 
-bool
-Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
-                              unsigned int firstWord)
+spv_result_t
+Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 {
    auto getOp = [&](spv::Id id, unsigned c = 0u, bool constants_allowed = true){
       auto searchOp = spvValues.find(id);
@@ -1741,17 +1676,14 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       return static_cast<Type const*>(nullptr);
    };
 
+   const spv::Op opcode = static_cast<spv::Op>(parsedInstruction->opcode);
    switch (opcode) {
    case spv::Op::OpCapability:
-      if (numWords != 2u) {
-         _debug_printf("OpCapability expects 2 operands but got %u\n", numWords);
-         return false;
-      }
       {
          using Cap = spv::Capability;
-         Cap capability = getWord<Cap>(firstWord);
+         Cap capability = spirv::getOperand<Cap>(parsedInstruction, 0u);
          if (info->target < 0xc0) {
-            return true;
+            return SPV_SUCCESS;
 
             if (capability == Cap::Tessellation || capability == Cap::Vector16 ||
                 capability == Cap::Float16Buffer || capability == Cap::Float16 ||
@@ -1760,108 +1692,84 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
                 capability == Cap::TessellationPointSize || capability == Cap::Int8 ||
                 capability == Cap::TransformFeedback) {
                _debug_printf("Capability unsupported: %u\n", capability);
-               return false;
+               return SPV_UNSUPPORTED;
             }
          }
       }
       break;
    case spv::Op::OpExtInstImport:
-      if (numWords < 3u) {
-         _debug_printf("OpExtInstImport expects at least 3 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         spv::Id result = getWord<spv::Id>(firstWord);
-         std::string setName = binary + (firstWord + 1u) * sizeof(uint32_t);
+         spv::Id result = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         std::string setName = spirv::getOperand<const char*>(parsedInstruction, 1u);
          if (setName.empty()) {
-            _debug_printf("Couldn't parse the name of OpExtInstImport at word %u\n", firstWord);
-            return false;
+            _debug_printf("Couldn't parse the name of OpExtInstImport\n");
+            return SPV_ERROR_INVALID_BINARY;
          }
          if (setName != "OpenCL.std") {
             _debug_printf("OpExtInstImport \"%s\" is unsupported\n", setName.c_str());
-            return false;
+            return SPV_UNSUPPORTED;
          }
          extInstructions.emplace(result, setName);
       }
       break;
    case spv::Op::OpExtInst:
-      if (numWords < 5u) {
-         _debug_printf("OpExtInst expects at least 5 operands but got %u\n", firstWord);
-         return false;
-      }
       {
-         auto id = getWord<spv::Id>(firstWord + 1u);
-         auto searchType = types.find(getWord<spv::Id>(firstWord));
+         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto searchType = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
          if (searchType == types.end()) {
-            _debug_printf("Couldn't find type used by OpExInst at word %u\n", firstWord);
-            return false;
+            _debug_printf("Couldn't find type used by OpExInst\n");
+            return SPV_ERROR_INVALID_ID;
          }
-         auto searchExt = extInstructions.find(getWord<spv::Id>(firstWord + 2u));
+         auto searchExt = extInstructions.find(spirv::getOperand<spv::Id>(parsedInstruction, 2u));
          if (searchExt == extInstructions.end()) {
-            _debug_printf("Couldn't find extension set used by ExtInst at word %u\n", firstWord);
-            return false;
+            _debug_printf("Couldn't find extension set used by ExtInst\n");
+            return SPV_ERROR_MISSING_EXTENSION;
          }
-         auto const op = getWord<spv::Id>(firstWord + 3u);
+         auto const op = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
          if (searchExt->second == "OpenCL.std") {
-            return convertOpenCLInstruction(id, searchType->second, op, firstWord, numWords);
+            return convertOpenCLInstruction(id, searchType->second, op, parsedInstruction);
          } else {
             _debug_printf("Unsupported extension set: \"%s\"\n", searchExt->second.c_str());
-            return false;
+            return SPV_UNSUPPORTED;
          }
       }
       break;
    case spv::Op::OpMemoryModel:
-      if (numWords != 3u) {
-         _debug_printf("OpMemoryModel expects 3 operands but got %u\n", numWords);
-         return false;
-      }
-      addressingModel = getWord<spv::AddressingModel>(firstWord);
-      memoryModel = getWord<spv::MemoryModel>(firstWord + 1u);
+      addressingModel = spirv::getOperand<spv::AddressingModel>(parsedInstruction, 0u);
+      memoryModel = spirv::getOperand<spv::MemoryModel>(parsedInstruction, 1u);
       break;
    case spv::Op::OpEntryPoint:
-      return convertEntryPoint(numWords, firstWord);
+      return convertEntryPoint(parsedInstruction);
    // TODO(pmoreau): Properly handle the different execution modes
    case spv::Op::OpExecutionMode:
-      if (numWords < 3u) {
-         _debug_printf("OpExecutionMode expects at least 3 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         const auto entryPointId = getWord<spv::Id>(firstWord);
-         const auto executionMode = getWord<spv::ExecutionMode>(firstWord + 1u);
+         const auto entryPointId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         const auto executionMode = spirv::getOperand<spv::ExecutionMode>(parsedInstruction, 1u);
          _debug_printf("Ignoring unsupported execution mode %u for entry point %u\n", entryPointId, executionMode);
       }
       break;
    case spv::Op::OpSource:
-      return true;
+      return SPV_SUCCESS;
    case spv::Op::OpName:
-      if (numWords < 3u) {
-         _debug_printf("OpName expects at least 3 operands but got %u\n", numWords);
-         return false;
-      }
-      names.emplace(getWord<spv::Id>(firstWord), binary + (firstWord + 1u) * sizeof(uint32_t));
+      names.emplace(spirv::getOperand<spv::Id>(parsedInstruction, 0u), spirv::getOperand<const char*>(parsedInstruction, 1u));
       break;
    case spv::Op::OpDecorate:
-      return convertDecorate(numWords, firstWord);
+      return convertDecorate(parsedInstruction);
    case spv::Op::OpMemberDecorate:
-      return false;
+      return SPV_UNSUPPORTED;
    case spv::Op::OpDecorationGroup:
       break;
    case spv::Op::OpGroupDecorate:
-      if (numWords < 2u) {
-         _debug_printf("OpGroupDecorate expects at least 2 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto groupId = getWord<spv::Id>(firstWord);
+         auto groupId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto searchGroup = decorations.find(groupId);
          if (searchGroup == decorations.end()) {
             _debug_printf("DecorationGroup %u was not defined\n", groupId);
-            return false;
+            return SPV_ERROR_INVALID_ID;
          }
 
-         for (unsigned int i = 1u; i < numWords; ++i) {
-            auto targetId = getWord<spv::Id>(firstWord + i);
+         for (unsigned int i = 1u; i < parsedInstruction->num_operands; ++i) {
+            auto targetId = spirv::getOperand<spv::Id>(parsedInstruction, i);
             auto &idDecorations = decorations[targetId];
             for (const auto &k : searchGroup->second)
                idDecorations[k.first].insert(idDecorations[k.first].end(), k.second.begin(), k.second.end());
@@ -1869,46 +1777,39 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpTypeVoid:
-      return convertType<TypeVoid>(numWords, firstWord);
+      return convertType<TypeVoid>(parsedInstruction);
    case spv::Op::OpTypeBool:
-      return convertType<TypeBool>(numWords, firstWord);
+      return convertType<TypeBool>(parsedInstruction);
    case spv::Op::OpTypeInt:
-      return convertType<TypeInt>(numWords, firstWord);
+      return convertType<TypeInt>(parsedInstruction);
    case spv::Op::OpTypeFloat:
-      return convertType<TypeFloat>(numWords, firstWord);
+      return convertType<TypeFloat>(parsedInstruction);
    case spv::Op::OpTypeStruct:
-      return convertType<TypeStruct>(numWords, firstWord);
+      return convertType<TypeStruct>(parsedInstruction);
    case spv::Op::OpTypeVector:
-      return convertType<TypeVector>(numWords, firstWord);
+      return convertType<TypeVector>(parsedInstruction);
    case spv::Op::OpTypeArray:
-      return convertType<TypeArray>(numWords, firstWord);
+      return convertType<TypeArray>(parsedInstruction);
    case spv::Op::OpTypePointer:
-      return convertType<TypePointer>(numWords, firstWord);
+      return convertType<TypePointer>(parsedInstruction);
    case spv::Op::OpTypeFunction:
-      return convertType<TypeFunction>(numWords, firstWord);
+      return convertType<TypeFunction>(parsedInstruction);
    case spv::Op::OpTypeSampler:
-      return convertType<TypeSampler>(numWords, firstWord);
+      return convertType<TypeSampler>(parsedInstruction);
    case spv::Op::OpTypeImage:
-      return convertType<TypeImage>(numWords, firstWord);
+      return convertType<TypeImage>(parsedInstruction);
    case spv::Op::OpTypeSampledImage:
-      return convertType<TypeSampledImage>(numWords, firstWord);
+      return convertType<TypeSampledImage>(parsedInstruction);
    case spv::Op::OpConstant:
-      if (numWords < 3u) {
-         _debug_printf("OpConstant expects at least 3 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto id = getWord<spv::Id>(firstWord + 1u);
-         auto search = types.find(getWord<spv::Id>(firstWord));
+         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto search = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
          if (search == types.end()) {
-            _debug_printf("Couldn't find type used by OpConstant at word %u\n", firstWord);
-            return false;
+            _debug_printf("Couldn't find type used by OpConstant\n");
+            return SPV_ERROR_INVALID_ID;
          }
-         Words values = Words();
-         for (unsigned int i = 2u; i < numWords - 1u; ++i)
-            values.push_back(getWord<unsigned>(firstWord + i));
-         unsigned int position = 0u;
-         auto constants = search->second->generateConstant(values, *this, position);
+         uint16_t operandIndex = 2u;
+         auto constants = search->second->generateConstant(*this, parsedInstruction, operandIndex);
          std::vector<PValue> res;
          for (auto c : constants)
             res.push_back(c);
@@ -1917,11 +1818,11 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       break;
    case spv::Op::OpConstantNull:
       {
-         auto id = getWord<spv::Id>(firstWord + 1u);
-         auto search = types.find(getWord<spv::Id>(firstWord));
+         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto search = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
          if (search == types.end()) {
-            _debug_printf("Couldn't find type used by OpConstant at word %u\n", firstWord);
-            return false;
+            _debug_printf("Couldn't find type used by OpConstant\n");
+            return SPV_ERROR_INVALID_ID;
          }
          auto constants = search->second->generateNullConstant(*this);
          std::vector<PValue> res;
@@ -1930,24 +1831,20 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
          spvValues.emplace(id, SpirVValue{ SpirvFile::IMMEDIATE, search->second, res, search->second->getPaddings() });
       }
    case spv::Op::OpConstantComposite:
-      if (numWords < 3u) {
-         _debug_printf("OpConstantComposite expects at least 3 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto id = getWord<spv::Id>(firstWord + 1u);
-         auto search = types.find(getWord<spv::Id>(firstWord));
+         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto search = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
          if (search == types.end()) {
-            _debug_printf("Couldn't find type used by OpConstant at word %u\n", firstWord);
-            return false;
+            _debug_printf("Couldn't find type used by OpConstant\n");
+            return SPV_ERROR_INVALID_ID;
          }
          auto values = std::vector<PValue>();
-         for (unsigned int i = 2u; i < numWords - 1u; ++i) {
-            auto elemId = getWord<spv::Id>(firstWord + i);
+         for (unsigned int i = 2u; i < parsedInstruction->num_operands; ++i) {
+            auto elemId = spirv::getOperand<spv::Id>(parsedInstruction, i);
             auto searchElem = spvValues.find(elemId);
             if (searchElem == spvValues.end()) {
                _debug_printf("Couldn't find constant %u for constant composite %u\n", elemId, id);
-               return false;
+               return SPV_ERROR_INVALID_ID;
             }
             values.insert(values.end(), searchElem->second.value.cbegin(), searchElem->second.value.cend());
          }
@@ -1956,21 +1853,16 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       break;
    case spv::Op::OpConstantSampler:
       {
-         if (numWords != 6u) {
-            _debug_printf("OpConstantSampler expects at 6 operands but got %u\n", numWords);
-            return false;
-         }
-
-         auto const typeId = getWord<spv::Id>(firstWord);
+         auto const typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto const searchType = types.find(typeId);
          if (searchType == types.end()) {
-            _debug_printf("Couldn't find type %u used by OpConstantSampler at word %u\n", typeId, firstWord);
-            return false;
+            _debug_printf("Couldn't find type %u used by OpConstantSampler\n", typeId);
+            return SPV_ERROR_INVALID_ID;
          }
-         auto const resId = getWord<spv::Id>(firstWord + 1u);
-         auto const addressingMode = getWord<spv::SamplerAddressingMode>(firstWord + 2u);
-         auto const param = getWord<unsigned>(firstWord + 3u);
-         auto const filterMode = getWord<spv::SamplerFilterMode>(firstWord + 4u);
+         auto const resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto const addressingMode = spirv::getOperand<spv::SamplerAddressingMode>(parsedInstruction, 2u);
+         auto const param = spirv::getOperand<unsigned>(parsedInstruction, 3u);
+         auto const filterMode = spirv::getOperand<spv::SamplerFilterMode>(parsedInstruction, 4u);
 
          auto const usesNormalizedCoords = param == 0u;
 
@@ -1978,18 +1870,14 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpVariable:
-      if (numWords < 4u) {
-         _debug_printf("OpVariable expects at least 4 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto search = types.find(getWord<spv::Id>(firstWord));
+         auto search = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
          if (search == types.end()) {
-            _debug_printf("Couldn't find type used by OpVariable at word %u\n", firstWord);
-            return false;
+            _debug_printf("Couldn't find type used by OpVariable\n");
+            return SPV_ERROR_INVALID_ID;
          }
-         auto id = getWord<spv::Id>(firstWord + 1u);
-         auto storage_file = getStorageFile(getWord<spv::StorageClass>(firstWord + 2u));
+         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto storage_file = getStorageFile(spirv::getOperand<spv::StorageClass>(parsedInstruction, 2u));
 
          auto ptr = static_cast<TypePointer const*>(search->second);
          auto isBuiltIn = false;
@@ -1999,16 +1887,16 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
             auto search_linkage = search_decorations->second.find(spv::Decoration::BuiltIn);
             if (!isBuiltIn && search_linkage != search_decorations->second.end() && static_cast<spv::LinkageType>(search_linkage->second[0][0]) == spv::LinkageType::Import) {
                _debug_printf("Variable %u has linkage type \"import\"! Missing a link step?\n", id);
-               return false;
+               return SPV_ERROR_INVALID_POINTER;
             }
          }
 
-         if (numWords == 5u) {
-            auto init_id = getWord<spv::Id>(firstWord + 3u);
+         if (parsedInstruction->num_operands == 4u) {
+            auto init_id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
             auto searchObject = spvValues.find(init_id);
             if (searchObject == spvValues.end()) {
                _debug_printf("Couldn't find initial value %u for variable %u\n", init_id, id);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
 
             // If we have an immediate, which are stored in const memory,
@@ -2025,17 +1913,13 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
    case spv::Op::OpNop:
       break;
    case spv::Op::OpUndef:
-      if (numWords != 3u) {
-         _debug_printf("OpUndef expects 3 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto search = types.find(getWord<spv::Id>(firstWord));
+         auto search = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
          if (search == types.end()) {
-            _debug_printf("Couldn't find type used by OpUndef at word %u\n", firstWord);
-            return false;
+            _debug_printf("Couldn't find type used by OpUndef\n");
+            return SPV_ERROR_INVALID_LOOKUP;
          }
-         auto id = getWord<spv::Id>(firstWord + 1u);
+         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
 
          auto constants = search->second->generateNullConstant(*this);
          std::vector<PValue> res;
@@ -2048,37 +1932,33 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
    // * use FunctionControl
    // * use decorations
    case spv::Op::OpFunction:
-      if (numWords != 5u) {
-         _debug_printf("OpFunction expects 5 operands but got %u\n", numWords);
-         return false;
-      }
       if (func != nullptr) {
          _debug_printf("Defining a function inside another function is not allowed!\n");
-         return false;
+         return SPV_ERROR_INTERNAL;
       }
       {
-         spv::Id id = getWord<spv::Id>(firstWord + 1u);
+         spv::Id id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
          auto search_func = functions.find(id);
          if (search_func != functions.end()) {
             func = search_func->second;
             setPosition(BasicBlock::get(func->cfg.getRoot()), true);
-            return true;
+            return SPV_SUCCESS;
          }
 
-         auto resTypeId = getWord<spv::Id>(firstWord);
+         auto resTypeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto resTypeIter = types.find(resTypeId);
          if (resTypeIter == types.end()) {
             _debug_printf("Couldn't find return type %u of function %u\n", resTypeId, id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          using FCM = spv::FunctionControlMask;
-         FCM control = getWord<FCM>(firstWord + 2u);
+         FCM control = spirv::getOperand<FCM>(parsedInstruction, 2u);
 
          auto search_name = names.find(id);
          if (search_name == names.end()) {
-            _debug_printf("Couldn't find a name for function at word %u\n", firstWord);
-            return false;
+            _debug_printf("Couldn't find a name for function\n");
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto search_entry = entryPoints.find(id);
          auto const label = (search_entry == entryPoints.end()) ? UINT32_MAX : search_entry->second.index; // XXX valid symbol needed for functions?
@@ -2106,21 +1986,17 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
    // TODO:
    // * use decorations
    case spv::Op::OpFunctionParameter:
-      if (numWords != 3u) {
-         _debug_printf("OpFunctionParameter expects 3 operands but got %u\n", numWords);
-         return false;
-      }
       if (func == nullptr) {
          _debug_printf("Defining function parameters outside of function definition is not allowed\n");
-         return false;
+         return SPV_ERROR_INTERNAL;
       }
       {
-         spv::Id id = getWord<spv::Id>(firstWord + 1u);
-         spv::Id type = getWord<spv::Id>(firstWord);
+         spv::Id id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         spv::Id type = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto search = types.find(type);
          if (search == types.end()) {
             _debug_printf("Couldn't find type associated to id %u\n", type);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          bool isKernel = false;
          auto search_entry = entryPoints.find(currentFuncId);
@@ -2162,13 +2038,9 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpFunctionEnd:
-      if (numWords != 1u) {
-         _debug_printf("OpFunctionEnd expects 1 operand but got %u\n", numWords);
-         return false;
-      }
       if (func == nullptr) {
          _debug_printf("Reached end of function while not defining one\n");
-         return false;
+         return SPV_ERROR_INTERNAL;
       }
       {
          for (auto i : phiToMatch) {
@@ -2176,7 +2048,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
             auto searchPhiData = phiNodes.find(phiId);
             if (searchPhiData == phiNodes.end()) {
                _debug_printf("Couldn't find phi data for id %u\n", phiId);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
             for (auto j : i.second) {
                auto index = j.first;
@@ -2186,7 +2058,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
                   auto searchVar = spvValues.find(varId);
                   if (searchVar == spvValues.end()) {
                      _debug_printf("Couldn't find variable with id %u\n", varId);
-                     return false;
+                     return SPV_ERROR_INVALID_LOOKUP;
                   }
                   varBbPair.first = searchVar->second.value;
                   _debug_printf("Found var with id %u: %p\n", varId, varBbPair.first[0]);
@@ -2196,7 +2068,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
                   auto searchBb = blocks.find(bbId);
                   if (searchBb == blocks.end()) {
                      _debug_printf("Couldn't find BB with id %u\n", bbId);
-                     return false;
+                     return SPV_ERROR_INVALID_LOOKUP;
                   }
                   varBbPair.second = searchBb->second;
                   _debug_printf("Found bb with id %u: %p\n", bbId, varBbPair.second);
@@ -2215,12 +2087,12 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
                   auto searchPhi = phiMapping.find(i);
                   if (searchPhi == phiMapping.end()) {
                      assert(false);
-                     return false;
+                     return SPV_ERROR_INTERNAL;
                   }
                   auto searchPhiData = phiNodes.find(searchPhi->second);
                   if (searchPhiData == phiNodes.end()) {
                      assert(false);
-                     return false;
+                     return SPV_ERROR_INTERNAL;
                   }
                   auto counter = 0u;
                   for (auto& phiPair : searchPhiData->second) {
@@ -2255,30 +2127,26 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpFunctionCall:
-      if (numWords < 4u) {
-         _debug_printf("OpFunctionCall expects at lest 4 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto resTypeId = getWord<spv::Id>(firstWord);
+         auto resTypeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto resTypeIter = types.find(resTypeId);
          if (resTypeIter == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", resTypeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto resType = resTypeIter->second;
 
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto functionId = getWord<spv::Id>(firstWord + 2u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto functionId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
 
          auto insn = mkFlow(OP_CALL, nullptr, CC_ALWAYS, NULL);
 
-         for (size_t i = 3u, j = 0u; i < numWords - 1u; ++i, ++j) {
-            auto const argId = getWord<spv::Id>(firstWord + i);
+         for (size_t i = 3u, j = 0u; i < parsedInstruction->num_operands; ++i, ++j) {
+            auto const argId = spirv::getOperand<spv::Id>(parsedInstruction, i);
             auto argIter = spvValues.find(argId);
             if (argIter == spvValues.end()) {
                _debug_printf("Couldn't not find %uth argument %u of function call %u\n", j, argId, functionId);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
             insn->setSrc(i - 3u, argIter->second.value.front().value);
          }
@@ -2299,13 +2167,9 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpLabel:
-      if (numWords != 2u) {
-         _debug_printf("OpLabel expects 2 operands but got %u\n", numWords);
-         return false;
-      }
       if (bb != nullptr && blocks.size() != 1u) {
          _debug_printf("Defining a block inside another block is not allowed\n");
-         return false;
+         return SPV_ERROR_INTERNAL;
       }
       {
          BasicBlock *block = new BasicBlock(func);
@@ -2317,7 +2181,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
             blocks[0u]->cfg.attach(&block->cfg, Graph::Edge::TREE);
          }
 
-         auto id = getWord<spv::Id>(firstWord);
+         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto searchFlows = branchesToMatch.find(id);
          if (searchFlows != branchesToMatch.end()) {
             for (auto& flow : searchFlows->second) {
@@ -2332,13 +2196,9 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpReturn:
-      if (numWords != 1u) {
-         _debug_printf("OpReturn expects 1 operand but got %u\n", numWords);
-         return false;
-      }
       if (bb == nullptr) {
          _debug_printf("Reached end of block while not defining one\n");
-         return false;
+         return SPV_ERROR_INTERNAL;
       }
       {
          BasicBlock *leave = BasicBlock::get(func->cfgExit);
@@ -2349,20 +2209,16 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpReturnValue:
-      if (numWords != 2u) {
-         _debug_printf("OpReturnValue expects 2 operand but got %u\n", numWords);
-         return false;
-      }
       if (bb == nullptr) {
          _debug_printf("Reached end of block while not defining one\n");
-         return false;
+         return SPV_ERROR_INTERNAL;
       }
       {
-         auto retId = getWord<spv::Id>(firstWord);
+         auto retId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto retIter = spvValues.find(retId);
          if (retIter == spvValues.end()) {
-            _debug_printf("Couldn't find value %u returned at word %u\n", retId, firstWord);
-            return false;
+            _debug_printf("Couldn't find value %u returned\n", retId);
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          assert(func->outs.size() == 1u);
          mkOp1(OP_MOV, retIter->second.type->getEnumType(), func->outs.front().get(), retIter->second.value.front().value);
@@ -2375,16 +2231,12 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpBranch:
-      if (numWords != 2u) {
-         _debug_printf("OpBranch expects 2 operands but got %u\n", numWords);
-         return false;
-      }
       if (bb == nullptr) {
          _debug_printf("Reached end of block while not defining one\n");
-         return false;
+         return SPV_ERROR_INTERNAL;
       }
       {
-         auto labelId = getWord<spv::Id>(firstWord);
+         auto labelId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto searchLabel = blocks.find(labelId);
          if (searchLabel == blocks.end()) {
             auto flow = mkFlow(OP_BRA, nullptr, CC_ALWAYS, nullptr);
@@ -2402,23 +2254,19 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpBranchConditional:
-      if (numWords < 4u) {
-         _debug_printf("OpBranchConditional expects at least 4 operands but got %u\n", numWords);
-         return false;
-      }
       if (bb == nullptr) {
          _debug_printf("Reached end of block while not defining one\n");
-         return false;
+         return SPV_ERROR_INTERNAL;
       }
       {
-         auto predId = getWord<spv::Id>(firstWord);
-         auto ifId = getWord<spv::Id>(firstWord + 1u);
-         auto elseId = getWord<spv::Id>(firstWord + 2u);
+         auto predId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto ifId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto elseId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
 
          auto searchPred = spvValues.find(predId);
          if (searchPred == spvValues.end()) {
             _debug_printf("Couldn't find predicate with id %u\n", predId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto pred = searchPred->second.value[0].value;
          auto searchIf = blocks.find(ifId);
@@ -2455,24 +2303,20 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpPhi:
-      if (numWords <= 3u) {
-         _debug_printf("OpPhi expects at least 3 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
          auto searchType = types.find(typeId);
          if (searchType == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto type = searchType->second;
          auto parents = std::vector<std::pair<std::vector<PValue>, BasicBlock*>>();
          auto toMatchs = std::unordered_map<uint32_t, std::pair<spv::Id, spv::Id>>();
-         for (unsigned int i = 2u, counter = 0u; i < numWords - 2u; i += 2u, ++counter) {
+         for (unsigned int i = 2u, counter = 0u; i < parsedInstruction->num_operands; i += 2u, ++counter) {
             auto vars = std::vector<PValue>();
-            auto varId = getWord<spv::Id>(firstWord + i);
+            auto varId = spirv::getOperand<spv::Id>(parsedInstruction, i);
             auto toMatch = std::make_pair<spv::Id, spv::Id>(0u, 0u);
             for (unsigned int j = 0u; j < type->getElementsNb(); ++j) {
                auto var = getOp(varId, j, false).value;
@@ -2482,7 +2326,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
                }
                vars.push_back(var);
             }
-            auto bbId = getWord<spv::Id>(firstWord + i + 1);
+            auto bbId = spirv::getOperand<spv::Id>(parsedInstruction, i + 1);
             auto searchBB = blocks.find(bbId);
             if (searchBB == blocks.end()) {
                _debug_printf("Couldn't find BB with id %u, keeping looking for it\n", bbId);
@@ -2508,30 +2352,26 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpSwitch:
-      if (numWords < 3u) {
-         _debug_printf("OpSwitch expects at least 3 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         spv::Id selectorId = getWord<spv::Id>(firstWord);
+         spv::Id selectorId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto search_selector = spvValues.find(selectorId);
          if (search_selector == spvValues.end()) {
             _debug_printf("Could not find selector with id %u\n", selectorId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto type = search_selector->second.type;
          auto const width = type->getSize() / 4u; // FIXME need to round it to upper
          BasicBlock *new_bb = bb;
          BasicBlock *old_bb = bb;
-         for (size_t i = 2u; i < numWords - 1u; i += width + 1u) {
+         for (size_t i = 2u; i < parsedInstruction->num_operands; i += width + 1u) {
             Words values = Words();
             for (unsigned int j = 0u; j < width; ++j)
-               values.push_back(getWord<unsigned>(firstWord + i + j));
-            unsigned int position = 0u;
-            auto imm = type->generateConstant(values, *this, position).front();
+               values.push_back(spirv::getOperand<unsigned>(parsedInstruction, i + j));
+            uint16_t operandIndex = 0u;
+            auto imm = type->generateConstant(*this, parsedInstruction, operandIndex).front();
             auto imm2 = getScratch(type->getSize());
             mkMov(imm2, imm, type->getEnumType());
-            auto const label_id = getWord<spv::Id>(firstWord + i + width);
+            auto const label_id = spirv::getOperand<spv::Id>(parsedInstruction, i + width);
             auto pred = getScratch(1, FILE_PREDICATE);
             mkCmp(OP_SET, CC_EQ, TYPE_U32, pred, type->getEnumType(), search_selector->second.value[0].value, imm2);
             auto search_label = blocks.find(label_id);
@@ -2552,7 +2392,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
             old_bb = new_bb;
          }
 
-         auto const default_id = getWord<spv::Id>(firstWord + 1u);
+         auto const default_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
          auto search_label = blocks.find(default_id);
          if (search_label == blocks.end()) {
             auto flow = mkFlow(OP_BRA, nullptr, CC_ALWAYS, nullptr);
@@ -2570,31 +2410,22 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpLoad:
-      if (numWords < 4u) {
-         _debug_printf("OpLoad expects at least 4 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto type_id = getWord<spv::Id>(firstWord);
+         auto type_id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto searchType = types.find(type_id);
          if (searchType == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", type_id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto type = searchType->second;
-         spv::Id resId = getWord<spv::Id>(firstWord + 1u);
-         spv::Id pointerId = getWord<spv::Id>(firstWord + 2u);
+         spv::Id resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         spv::Id pointerId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
          spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone;
-         if (numWords == 5u)
-            access = getWord<spv::MemoryAccessMask>(firstWord + 3u);
+         if (parsedInstruction->num_operands == 4u)
+            access = spirv::getOperand<spv::MemoryAccessMask>(parsedInstruction, 3u);
          uint32_t alignment = 0u;
-         if (hasFlag(access, spv::MemoryAccessShift::Aligned)) {
-            if (numWords != 6u) {
-               _debug_printf("OpLoad with an aligned memory access flag expects 6 operands but got %u\n", numWords);
-               return false;
-            }
-            alignment = getWord<unsigned>(firstWord + 4u);
-         }
+         if (hasFlag(access, spv::MemoryAccessShift::Aligned))
+            alignment = spirv::getOperand<unsigned>(parsedInstruction, 4u);
 
          auto search_decorations = decorations.find(pointerId);
          if (search_decorations != decorations.end()) {
@@ -2609,7 +2440,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
          auto search_pointer = spvValues.find(pointerId);
          if (search_pointer == spvValues.end()) {
             _debug_printf("Couldn't find pointer with id %u\n", pointerId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto pointer_type = reinterpret_cast<const TypePointer *>(search_pointer->second.type);
@@ -2617,36 +2448,27 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpStore:
-      if (numWords < 3u) {
-         _debug_printf("OpStore expects at least 3 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         spv::Id pointerId = getWord<spv::Id>(firstWord);
-         spv::Id objectId = getWord<spv::Id>(firstWord + 1u);
+         spv::Id pointerId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         spv::Id objectId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
          spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone;
-         if (numWords == 4u)
-            access = getWord<spv::MemoryAccessMask>(firstWord + 2u);
+         if (parsedInstruction->num_operands == 3u)
+            access = spirv::getOperand<spv::MemoryAccessMask>(parsedInstruction, 2u);
          uint32_t alignment = 0u;
-         if (hasFlag(access, spv::MemoryAccessShift::Aligned)) {
-            if (numWords != 5u) {
-               _debug_printf("OpStore with an aligned memory access flag expects 5 operands but got %u\n", numWords);
-               return false;
-            }
-            alignment = getWord<unsigned>(firstWord + 3u);
-         }
+         if (hasFlag(access, spv::MemoryAccessShift::Aligned))
+            alignment = spirv::getOperand<unsigned>(parsedInstruction, 3u);
 
          auto search_pointer = spvValues.find(pointerId);
          if (search_pointer == spvValues.end()) {
             _debug_printf("Couldn't find pointer with id %u\n", pointerId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto pointer_type = reinterpret_cast<const TypePointer *>(search_pointer->second.type);
          auto searchElementStruct = spvValues.find(objectId);
          if (searchElementStruct == spvValues.end()) {
             _debug_printf("Couldn't find object with id %u\n", objectId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto value = searchElementStruct->second.value;
@@ -2655,31 +2477,27 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       break;
    case spv::Op::OpPtrAccessChain: // FALLTHROUGH
    case spv::Op::OpInBoundsPtrAccessChain:
-      if (numWords < 5u) {
-         _debug_printf("OpInBoundsPtrAccessChain expects at least 5 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto resTypeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto baseId = getWord<spv::Id>(firstWord + 2u);
+         auto resTypeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto baseId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
 
          auto searchBaseStruct = spvValues.find(baseId);
          if (searchBaseStruct == spvValues.end()) {
             _debug_printf("Couldn't find base with id %u\n", baseId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto& baseStruct = searchBaseStruct->second;
          auto base = baseStruct.value[0];
          auto baseType = baseStruct.type;
 
          std::vector<Value *> indices;
-         for (unsigned int i = 3u; i < numWords - 1u; ++i) {
-            auto elementId = getWord<spv::Id>(firstWord + i);
+         for (unsigned int i = 3u; i < parsedInstruction->num_operands; ++i) {
+            auto elementId = spirv::getOperand<spv::Id>(parsedInstruction, i);
             auto searchElementStruct = spvValues.find(elementId);
             if (searchElementStruct == spvValues.end()) {
                _debug_printf("Couldn't find element with id %u\n", elementId);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
 
             auto& elementStruct = searchElementStruct->second;
@@ -2690,7 +2508,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
          auto resTypeIter = types.find(resTypeId);
          if (resTypeIter == types.end()) {
             _debug_printf("Couldn't find pointer type of id %u\n", resTypeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto resType = reinterpret_cast<const TypePointer *>(resTypeIter->second);
 
@@ -2750,19 +2568,15 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpCompositeExtract:
-      if (numWords < 4u) {
-         _debug_printf("OpCompositeExtract expects at least 4 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto baseId = getWord<spv::Id>(firstWord + 2u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto baseId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
 
          auto searchBaseStruct = spvValues.find(baseId);
          if (searchBaseStruct == spvValues.end()) {
             _debug_printf("Couldn't find base with id %u\n", baseId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto& baseStruct = searchBaseStruct->second;
          auto base = baseStruct.value[0];
@@ -2770,13 +2584,13 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
          auto type = types.find(typeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto baseType = baseStruct.type;
 
          auto ids = std::vector<unsigned int>();
-         for (unsigned int i = 3u; i < numWords - 1u; ++i)
-            ids.push_back(getWord<unsigned int>(firstWord + i));
+         for (unsigned int i = 3u; i < parsedInstruction->num_operands; ++i)
+            ids.push_back(spirv::getOperand<unsigned int>(parsedInstruction, i));
          auto offset = baseType->getGlobalIdx(ids);
 
          Value* dst = nullptr;
@@ -2784,12 +2598,12 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
             auto searchSrc = spvValues.find(baseId);
             if (searchSrc == spvValues.end()) {
                _debug_printf("Member %u of id %u couldn't be found\n", offset, baseId);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
             auto& value = searchSrc->second.value;
             if (offset >= value.size()) {
                _debug_printf("Trying to access member %u out of %u\n", offset, value.size());
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
             auto src = value[offset].value;
             dst = getScratch(type->second->getSize());
@@ -2801,26 +2615,22 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpCompositeInsert:
-      if (numWords < 5u) {
-         _debug_printf("OpCompositeInsert expects at least 5 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto objId = getWord<spv::Id>(firstWord + 2u);
-         auto baseId = getWord<spv::Id>(firstWord + 3u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto objId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto baseId = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
 
          auto obj = getOp(objId);
          if (obj.isUndefined()) {
             _debug_printf("Couldn't find obj with id %u\n", objId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto searchBaseStruct = spvValues.find(baseId);
          if (searchBaseStruct == spvValues.end()) {
             _debug_printf("Couldn't find base with id %u\n", baseId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto& baseStruct = searchBaseStruct->second;
          auto base = baseStruct.value[0];
@@ -2828,25 +2638,25 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
          auto type = types.find(typeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto baseType = baseStruct.type;
 
          auto ids = std::vector<unsigned int>();
-         for (unsigned int i = 4u; i < numWords - 1u; ++i)
-            ids.push_back(getWord<unsigned int>(firstWord + i));
+         for (unsigned int i = 4u; i < parsedInstruction->num_operands; ++i)
+            ids.push_back(spirv::getOperand<unsigned int>(parsedInstruction, i));
          auto offset = baseType->getGlobalIdx(ids);
 
          if (base.isValue()) {
             auto searchSrc = spvValues.find(baseId);
             if (searchSrc == spvValues.end()) {
                _debug_printf("Member %u of id %u couldn't be found\n", offset, baseId);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
             auto& value = searchSrc->second.value;
             if (offset >= value.size()) {
                _debug_printf("Trying to access member %u out of %u\n", offset, value.size());
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
             auto res = std::vector<PValue>(value.size());
             for (unsigned int i = 0u; i < value.size(); ++i) {
@@ -2859,30 +2669,26 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
             spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, res, type->second->getPaddings() });
          } else {
             _debug_printf("OpCompositeInsert is not supported yet on non-reg stored values\n");
-            return false;
+            return SPV_UNSUPPORTED;
          }
       }
       break;
    case spv::Op::OpBitcast:
-      if (numWords != 4u) {
-         _debug_printf("OpBitcast expects 4 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         const auto resTypeId = getWord<spv::Id>(firstWord);
-         const auto resId = getWord<spv::Id>(firstWord + 1u);
-         const auto operandId = getWord<spv::Id>(firstWord + 2u);
+         const auto resTypeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         const auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         const auto operandId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
 
          auto type = types.find(resTypeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", resTypeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto op = spvValues.find(operandId);
          if (op == spvValues.end()) {
             _debug_printf("Couldn't find op with id %u\n", operandId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto storageFile = SpirvFile::TEMPORARY;
@@ -2906,28 +2712,28 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
    case spv::Op::OpCopyMemory: // FALLTHROUGH
    case spv::Op::OpCopyMemorySized:
       {
-         const auto targetId = getWord<spv::Id>(firstWord);
-         const auto sourceId = getWord<spv::Id>(firstWord + 1u);
-         const auto access = ((opcode == spv::Op::OpCopyMemory && numWords > 3u) || (opcode == spv::Op::OpCopyMemorySized && numWords > 4u)) ? getWord<spv::MemoryAccessMask>(firstWord + 2u + (opcode == spv::Op::OpCopyMemorySized)) : spv::MemoryAccessMask::MaskNone;
-         const auto alignment = hasFlag(access, spv::MemoryAccessShift::Aligned) ? getWord<uint32_t>(firstWord + 4u) : 1u;
+         const auto targetId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         const auto sourceId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         const auto access = ((opcode == spv::Op::OpCopyMemory && parsedInstruction->num_operands > 2u) || (opcode == spv::Op::OpCopyMemorySized && parsedInstruction->num_operands > 3u)) ? spirv::getOperand<spv::MemoryAccessMask>(parsedInstruction, 2u + (opcode == spv::Op::OpCopyMemorySized)) : spv::MemoryAccessMask::MaskNone;
+         const auto alignment = hasFlag(access, spv::MemoryAccessShift::Aligned) ? spirv::getOperand<uint32_t>(parsedInstruction, 4u) : 1u;
 
          auto target = spvValues.find(targetId);
          if (target == spvValues.end()) {
             _debug_printf("Couldn't find target with id %u\n", targetId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto source = spvValues.find(sourceId);
          if (source == spvValues.end()) {
             _debug_printf("Couldn't find source with id %u\n", sourceId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          uint32_t sizeImm = 0u;
          if (opcode == spv::Op::OpCopyMemorySized) {
-            const auto sizeId = getWord<spv::Id>(firstWord + 2u);
+            const auto sizeId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
             auto size = spvValues.find(sizeId);
             if (size == spvValues.end()) {
                _debug_printf("Couldn't find size with id %u\n", sizeId);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
             assert(size->second.storageFile == SpirvFile::IMMEDIATE);
             sizeImm = (info->target < 0xc0) ? size->second.value[0u].value->reg.data.u32 : size->second.value[0u].value->reg.data.u64;
@@ -3028,7 +2834,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
             }
          } else {
             _debug_printf("Unsupported copy setup\n");
-            return false;
+            return SPV_UNSUPPORTED;
          }
       }
       break;
@@ -3052,42 +2858,38 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
    case spv::Op::OpULessThanEqual:
    case spv::Op::OpFOrdLessThanEqual:
    case spv::Op::OpFUnordLessThanEqual:
-      if (numWords != 5u) {
-         _debug_printf("OpCompositeExtract expects 5 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto op1Id = getWord<spv::Id>(firstWord + 2u);
-         auto op2Id = getWord<spv::Id>(firstWord + 3u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto op1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto op2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
 
          auto op1 = getOp(op1Id);
          if (op1.isUndefined()) {
             _debug_printf("Couldn't find op1 with id %u\n", op1Id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto op2 = getOp(op2Id);
          if (op2.isUndefined()) {
             _debug_printf("Couldn't find op2 with id %u\n", op2Id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto type = types.find(typeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto op1TypeSearch = spvValues.find(op1Id);
          if (op1TypeSearch == spvValues.end()) {
             _debug_printf("Couldn't fint type for id %u\n", op1Id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto op1Type = op1TypeSearch->second.type;
          auto op2TypeSearch = spvValues.find(op2Id);
          if (op2TypeSearch == spvValues.end()) {
             _debug_printf("Couldn't fint type for id %u\n", op2Id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto op2Type = op2TypeSearch->second.type;
 
@@ -3101,11 +2903,11 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
          }
          if (op1Type->getElementsNb() != op2Type->getElementsNb()) {
             _debug_printf("op1 with id %u, and op2 with id %u, should have the same number of elements\n", op1Id, op2Id);
-            return false;
+            return SPV_ERROR_INVALID_BINARY;
          }
          if (op1Type->getElementsNb() != type->second->getElementsNb()) {
             _debug_printf("op1 with id %u, and result type with id %u, should have the same number of elements\n", op1Id, typeId);
-            return false;
+            return SPV_ERROR_INVALID_BINARY;
          }
 
          int isSrcSigned = -1;
@@ -3133,19 +2935,15 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       break;
    case spv::Op::OpSNegate:
    case spv::Op::OpFNegate:
-      if (numWords != 4u) {
-         _debug_printf("Opv1 %u expects 4 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto opId = getWord<spv::Id>(firstWord + 2u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto opId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
 
          auto type = types.find(typeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto operation = convertOp(opcode);
@@ -3154,7 +2952,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
          if (type->second->getElementsNb() == 1u) {
             auto op = getOp(opId, 0u);
             if (op.isUndefined())
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
 
             auto *tmp = mkOp1v(operation, type->second->getEnumType(), getScratch(op.value->reg.size), op.value);
             value.push_back(tmp);
@@ -3162,7 +2960,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
             for (unsigned int i = 0u; i < type->second->getElementsNb(); ++i) {
                auto op = getOp(opId, i + 1u);
                if (op.isUndefined())
-                  return false;
+                  return SPV_ERROR_INVALID_LOOKUP;
 
                auto *tmp = mkOp1v(operation, type->second->getElementEnumType(i), getScratch(op.value->reg.size), op.value);
                value.push_back(tmp);
@@ -3184,32 +2982,28 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
    case spv::Op::OpSMod:
    case spv::Op::OpUMod:
    case spv::Op::OpFMod:
-      if (numWords != 5u) {
-         _debug_printf("Opv2 %u expects 5 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto op1Id = getWord<spv::Id>(firstWord + 2u);
-         auto op2Id = getWord<spv::Id>(firstWord + 3u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto op1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto op2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
 
          auto type = types.find(typeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto op1TypeSearch = spvValues.find(op1Id);
          if (op1TypeSearch == spvValues.end()) {
             _debug_printf("Couldn't fint type for id %u\n", op1Id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto op1Type = op1TypeSearch->second.type;
          auto op2TypeSearch = spvValues.find(op2Id);
          if (op2TypeSearch == spvValues.end()) {
             _debug_printf("Couldn't fint type for id %u\n", op2Id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto op2Type = op2TypeSearch->second.type;
 
@@ -3222,11 +3016,11 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
          }
          if (op1Type->getElementsNb() != op2Type->getElementsNb()) {
             _debug_printf("op1 with id %u, and op2 with id %u, should have the same number of elements\n", op1Id, op2Id);
-            return false;
+            return SPV_ERROR_INVALID_BINARY;
          }
          if (op1Type->getElementsNb() != type->second->getElementsNb()) {
             _debug_printf("op1 with id %u, and result type with id %u, should have the same number of elements\n", op1Id, typeId);
-            return false;
+            return SPV_ERROR_INVALID_BINARY;
          }
 
          int isSrcSigned = -1;
@@ -3250,12 +3044,12 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
             auto op1 = getOp(op1Id, 0u);
             if (op1.isUndefined()) {
                _debug_printf("Couldn't find op1 with id %u\n", op1Id);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
             auto op2 = getOp(op2Id, 0u);
             if (op2.isUndefined()) {
                _debug_printf("Couldn't find op2 with id %u\n", op2Id);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
 
             auto *tmp = mkOp2v(op, type->second->getEnumType(isSrcSigned), getScratch(op1.value->reg.size), op1.value, op2.value);
@@ -3265,12 +3059,12 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
                auto op1 = getOp(op1Id, i);
                if (op1.isUndefined()) {
                   _debug_printf("Couldn't find component %u for op1 with id %u\n", i, op1Id);
-                  return false;
+                  return SPV_ERROR_INVALID_LOOKUP;
                }
                auto op2 = getOp(op2Id, i);
                if (op2.isUndefined()) {
                   _debug_printf("Couldn't find component %u for op2 with id %u\n", i, op2Id);
-                  return false;
+                  return SPV_ERROR_INVALID_LOOKUP;
                }
 
                auto *tmp = mkOp2v(op, type->second->getElementEnumType(i, isSrcSigned), getScratch(op1.value->reg.size), op1.value, op2.value);
@@ -3283,32 +3077,28 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       break;
    case spv::Op::OpSRem:
    case spv::Op::OpFRem:
-      if (numWords != 5u) {
-         _debug_printf("Opv2 %u expects 5 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto op1Id = getWord<spv::Id>(firstWord + 2u);
-         auto op2Id = getWord<spv::Id>(firstWord + 3u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto op1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto op2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
 
          auto type = types.find(typeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto op1TypeSearch = spvValues.find(op1Id);
          if (op1TypeSearch == spvValues.end()) {
             _debug_printf("Couldn't fint type for id %u\n", op1Id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto op1Type = op1TypeSearch->second.type;
          auto op2TypeSearch = spvValues.find(op2Id);
          if (op2TypeSearch == spvValues.end()) {
             _debug_printf("Couldn't fint type for id %u\n", op2Id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto op2Type = op2TypeSearch->second.type;
 
@@ -3321,11 +3111,11 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
          }
          if (op1Type->getElementsNb() != op2Type->getElementsNb()) {
             _debug_printf("op1 with id %u, and op2 with id %u, should have the same number of elements\n", op1Id, op2Id);
-            return false;
+            return SPV_ERROR_INVALID_BINARY;
          }
          if (op1Type->getElementsNb() != type->second->getElementsNb()) {
             _debug_printf("op1 with id %u, and result type with id %u, should have the same number of elements\n", op1Id, typeId);
-            return false;
+            return SPV_ERROR_INVALID_BINARY;
          }
 
          int isSrcSigned = -1;
@@ -3342,12 +3132,12 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
             auto op1 = getOp(op1Id, 0u).value;
             if (op1 == nullptr) {
                _debug_printf("Couldn't find op1 with id %u\n", op1Id);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
             auto op2 = getOp(op2Id, 0u).value;
             if (op2 == nullptr) {
                _debug_printf("Couldn't find op2 with id %u\n", op2Id);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
 
             auto *tmp1 = mkOp2v(OP_DIV, type->second->getEnumType(isSrcSigned), getScratch(op1->reg.size), op1, op2);
@@ -3359,12 +3149,12 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
                auto op1 = getOp(op1Id, i).value;
                if (op1 == nullptr) {
                   _debug_printf("Couldn't find composante %u for op1 with id %u\n", i, op1Id);
-                  return false;
+                  return SPV_ERROR_INVALID_LOOKUP;
                }
                auto op2 = getOp(op2Id, i).value;
                if (op2 == nullptr) {
                   _debug_printf("Couldn't find composante %u op2 with id %u\n", i, op2Id);
-                  return false;
+                  return SPV_ERROR_INVALID_LOOKUP;
                }
 
                auto *tmp1 = mkOp2v(OP_DIV, type->second->getElementEnumType(i, isSrcSigned), getScratch(op1->reg.size), op1, op2);
@@ -3391,41 +3181,30 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
    case spv::Op::OpAtomicXor:
       {
          auto const has_no_value = (opcode == spv::Op::OpAtomicIIncrement) || (opcode == spv::Op::OpAtomicIDecrement);
-         if (has_no_value) {
-            if (numWords != 6u) {
-               _debug_printf("OpAtomic(IIncrement|IDecrement) %u expects 6 operands but got %u\n", opcode, numWords);
-               return false;
-            }
-         } else {
-            if (numWords != 7u) {
-               _debug_printf("OpAtomic(Exchange|IAdd|ISub|Smin|UMin|SMax|UMax|And|Or|Xor) %u expects 7 operands but got %u\n", opcode, numWords);
-               return false;
-            }
-         }
 
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto pointerId = getWord<spv::Id>(firstWord + 2u);
-         auto scope = getWord<spv::Scope>(firstWord + 3u);
-         auto memorySemantics = getWord<spv::MemorySemanticsMask>(firstWord + 4u);
-         auto valueId = has_no_value ? 0u : getWord<spv::Id>(firstWord + 5u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto pointerId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto scope = spirv::getOperand<spv::Scope>(parsedInstruction, 3u);
+         auto memorySemantics = spirv::getOperand<spv::MemorySemanticsMask>(parsedInstruction, 4u);
+         auto valueId = has_no_value ? 0u : spirv::getOperand<spv::Id>(parsedInstruction, 5u);
 
          auto type = types.find(typeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto values = std::vector<PValue>();
          auto pointer = getOp(pointerId, 0u).value; // Will that still work?
          if (pointer == nullptr) {
             _debug_printf("Couldn't find pointer with id %u\n", pointerId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto tmp_value = has_no_value ? nullptr : getOp(valueId, 0u).value;
          if (tmp_value == nullptr && !has_no_value) {
             _debug_printf("Couldn't find value with id %u\n", valueId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          int isSrcSigned = -1;
@@ -3467,41 +3246,36 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       break;
    case spv::Op::OpAtomicCompareExchange:
       {
-         if (numWords != 9u) {
-            _debug_printf("OpAtomicCompareExchange expects 9 operands but got %u\n", numWords);
-            return false;
-         }
-
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto pointerId = getWord<spv::Id>(firstWord + 2u);
-         auto scope = getWord<spv::Scope>(firstWord + 3u);
-         auto memorySemanticsEqual = getWord<spv::MemorySemanticsMask>(firstWord + 4u);
-         auto memorySemanticsUnequal = getWord<spv::MemorySemanticsMask>(firstWord + 5u);
-         auto valueId = getWord<spv::Id>(firstWord + 6u);
-         auto comparatorId = getWord<spv::Id>(firstWord + 7u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto pointerId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto scope = spirv::getOperand<spv::Scope>(parsedInstruction, 3u);
+         auto memorySemanticsEqual = spirv::getOperand<spv::MemorySemanticsMask>(parsedInstruction, 4u);
+         auto memorySemanticsUnequal = spirv::getOperand<spv::MemorySemanticsMask>(parsedInstruction, 5u);
+         auto valueId = spirv::getOperand<spv::Id>(parsedInstruction, 6u);
+         auto comparatorId = spirv::getOperand<spv::Id>(parsedInstruction, 7u);
 
          auto type = types.find(typeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto values = std::vector<PValue>();
          auto pointer = getOp(pointerId, 0u).value;
          if (pointer == nullptr) {
             _debug_printf("Couldn't find pointer with id %u\n", pointerId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto value = getOp(valueId, 0u).value;
          if (value == nullptr) {
             _debug_printf("Couldn't find value with id %u\n", valueId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto comparator = getOp(comparatorId, 0u).value;
          if (comparator == nullptr) {
             _debug_printf("Couldn't find comparator with id %u\n", comparatorId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto tmp = getScratch(type->second->getSize());
@@ -3515,33 +3289,29 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    case spv::Op::OpVectorTimesScalar:
-      if (numWords != 5u) {
-         _debug_printf("OpVectorTimesScalar %u expects 5 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto op1Id = getWord<spv::Id>(firstWord + 2u);
-         auto op2Id = getWord<spv::Id>(firstWord + 3u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto op1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto op2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
 
          auto type = types.find(typeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto value = std::vector<PValue>();
          auto op2 = getOp(op2Id, 0u).value;
          if (op2 == nullptr) {
             _debug_printf("Couldn't find op2 with id %u\n", op2Id);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          for (unsigned int i = 0u; i < type->second->getElementsNb(); ++i) {
             auto op1 = getOp(op1Id, i).value;
             if (op1 == nullptr) {
                _debug_printf("OpVectorTimesScalar %u: Couldn't find component %u op1 with id %u\n", resId, i, op1Id);
-               return false;
+               return SPV_ERROR_INVALID_LOOKUP;
             }
 
             auto *tmp = mkOp2v(OP_MUL, type->second->getElementEnumType(i), getScratch(op1->reg.size), op1, op2);
@@ -3559,31 +3329,27 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
    case spv::Op::OpConvertFToS:
    case spv::Op::OpSatConvertSToU:
    case spv::Op::OpSatConvertUToS:
-      if (numWords != 4u) {
-         _debug_printf("Op*Convert* %u expects 4 operands but got %u\n", numWords);
-         return false;
-      }
       {
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto srcId = getWord<spv::Id>(firstWord + 2u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto srcId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
 
          auto src = getOp(srcId).value;
          if (src == nullptr) {
             _debug_printf("Couldn't find src with id %u\n", srcId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto type = types.find(typeId);
          if (type == types.end()) {
             _debug_printf("Couldn't find type with id %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto srcType = getType(srcId);
          if (srcType == nullptr) {
              _debug_printf("Couldn't find type for id %u\n", srcId);
-             return false;
+             return SPV_ERROR_INVALID_LOOKUP;
          }
 
          int isSrcSigned = -1;
@@ -3639,30 +3405,25 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       break;
    case spv::Op::OpSampledImage:
       {
-         if (numWords != 5u) {
-            _debug_printf("OpSampledImage expects 5 operands but got %y\n", numWords);
-            return false;
-         }
-
-         auto typeId = getWord<spv::Id>(firstWord);
-         auto resId = getWord<spv::Id>(firstWord + 1u);
-         auto imageId = getWord<spv::Id>(firstWord + 2u);
-         auto samplerId = getWord<spv::Id>(firstWord + 3u);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto imageId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto samplerId = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
 
          auto searchType = types.find(typeId);
          if (searchType == types.end()) {
             _debug_printf("Could not find type %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto searchImage = spvValues.find(imageId);
          if (searchImage == spvValues.end()) {
             _debug_printf("Could not find image %u\n", imageId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto searchSampler = samplers.find(samplerId);
          if (searchSampler == samplers.end()) {
             _debug_printf("Could not find sampler %u\n", samplerId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          sampledImages.emplace(resId, SampledImage{ reinterpret_cast<TypeSampledImage const*>(searchType->second), searchImage->second.value.front().value, searchSampler->second });
@@ -3670,34 +3431,29 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       break;
    case spv::Op::OpImageSampleExplicitLod:
       {
-         if (numWords < 7u) {
-            _debug_printf("OpImageSampleExplicitLod expects at least 7 operands but got %u\n", numWords);
-            return false;
-         }
-
-         auto const typeId = getWord<spv::Id>(firstWord);
-         auto const resId = getWord<spv::Id>(firstWord + 1u);
-         auto const sampledImageId = getWord<spv::Id>(firstWord + 2u);
-         auto const coordinatesId = getWord<spv::Id>(firstWord + 3u);
-         auto const operand = getWord<spv::ImageOperandsMask>(firstWord + 4u);
+         auto const typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto const resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto const sampledImageId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto const coordinatesId = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
+         auto const operand = spirv::getOperand<spv::ImageOperandsMask>(parsedInstruction, 4u);
          auto operandArgs = std::vector<spv::Id>();
-         for (unsigned int i = firstWord + 5u; i < numWords; ++i)
-            operandArgs.push_back(getWord<spv::Id>(i));
+         for (unsigned int i = 5u; i < parsedInstruction->num_operands; ++i)
+            operandArgs.push_back(spirv::getOperand<spv::Id>(parsedInstruction, i));
 
          auto searchType = types.find(typeId);
          if (searchType == types.end()) {
             _debug_printf("Could not find type %u\n", typeId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto searchSampledImage = sampledImages.find(sampledImageId);
          if (searchSampledImage == sampledImages.end()) {
             _debug_printf("Could not find sampled image %u\n", sampledImageId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto searchCoordinates = spvValues.find(coordinatesId);
          if (searchCoordinates == spvValues.end()) {
             _debug_printf("Could not find sampler %u\n", coordinatesId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          auto const componentSize = searchType->second->getElementType(0u)->getSize();
@@ -3711,7 +3467,7 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
          auto searchImageType = types.find(imageTypeId);
          if (searchImageType == types.end()) {
             _debug_printf("Could not find type %u for sampler type %u\n", imageTypeId, sampledImageId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto const imageTarget = getTexTarget(reinterpret_cast<TypeImage const*>(searchImageType->second));
          auto const tic = 0;
@@ -3726,27 +3482,22 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       break;
    case spv::Op::OpImageWrite:
       {
-         if (numWords < 4u) {
-            _debug_printf("OpImageWrite expects at least 4 operands but got %u\n", numWords);
-            return false;
-         }
-
-         auto const imageId = getWord<spv::Id>(firstWord);
-         auto const coordinatesId = getWord<spv::Id>(firstWord + 1u);
-         auto const operand = getWord<spv::ImageOperandsMask>(firstWord + 2u);
+         auto const imageId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto const coordinatesId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto const operand = spirv::getOperand<spv::ImageOperandsMask>(parsedInstruction, 2u);
          auto operandArgs = std::vector<spv::Id>();
-         for (unsigned int i = firstWord + 3u; i < numWords; ++i)
-            operandArgs.push_back(getWord<spv::Id>(i));
+         for (unsigned int i = 3u; i < parsedInstruction->num_operands; ++i)
+            operandArgs.push_back(spirv::getOperand<spv::Id>(parsedInstruction, i));
 
          auto searchImage = spvValues.find(imageId);
          if (searchImage == spvValues.end()) {
             _debug_printf("Could not find image %u\n", imageId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
          auto searchCoordinates = spvValues.find(coordinatesId);
          if (searchCoordinates == spvValues.end()) {
             _debug_printf("Could not find sampler %u\n", coordinatesId);
-            return false;
+            return SPV_ERROR_INVALID_LOOKUP;
          }
 
          // TODO
@@ -3762,57 +3513,47 @@ Converter::convertInstruction(spv::Op opcode, unsigned int numWords,
       }
       break;
    default:
-      return false;
+      return SPV_UNSUPPORTED;
    }
 
-   return true;
+   return SPV_SUCCESS;
 }
 
-bool
-Converter::convertEntryPoint(unsigned int numWords, unsigned int firstWord)
+spv_result_t
+Converter::convertEntryPoint(const spv_parsed_instruction_t *parsedInstruction)
 {
-   if (numWords < 4u) {
-      _debug_printf("OpEntryPoint expects at least 4 operands but got %u\n", numWords);
-      return false;
-   }
-
-   std::string name = binary + (firstWord + 2u) * sizeof(uint32_t);
+   std::string name = spirv::getOperand<const char*>(parsedInstruction, 2u);
    unsigned int nextOperand = name.size() / 4u + (name.size() % 4u) != 0u;
    std::vector<spv::Id> references = std::vector<spv::Id>();
-   for (unsigned int i = nextOperand; i < firstWord + numWords; ++i)
-      references.push_back(getWord<spv::Id>(i));
-   EntryPoint entryPoint = { static_cast<uint32_t>(entryPoints.size()), getWord<spv::ExecutionModel>(firstWord),
+   for (unsigned int i = nextOperand; i < parsedInstruction->num_operands; ++i)
+      references.push_back(spirv::getOperand<spv::Id>(parsedInstruction, i));
+   EntryPoint entryPoint = { static_cast<uint32_t>(entryPoints.size()), spirv::getOperand<spv::ExecutionModel>(parsedInstruction, 0u),
                              name, references
    };
-   spv::Id id = getWord<spv::Id>(firstWord + 1u);
+   spv::Id id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
    entryPoints.emplace(id, entryPoint);
    auto search = names.find(id);
    if (search == names.end())
       names.emplace(id, name);
 
-   return true;
+   return SPV_SUCCESS;
 }
 
-bool
-Converter::convertDecorate(unsigned int numWords, unsigned int firstWord,
-                           bool hasMember)
+spv_result_t
+Converter::convertDecorate(const spv_parsed_instruction_t *parsedInstruction, bool hasMember)
 {
    assert(!hasMember);
    unsigned int offset = static_cast<unsigned int>(hasMember);
-   if (numWords < (3u + offset)) {
-      _debug_printf("OpDecorate expects at least %u operands but got %u\n", (3u + offset), numWords);
-      return false;
-   }
 
    Words literals = Words();
-   for (unsigned int i = 2u + offset; i < numWords - 1u; ++i)
-      literals.push_back(getWord<unsigned>(firstWord + i));
-   decorations[getWord<spv::Id>(firstWord)][getWord<spv::Decoration>(firstWord + 1u + offset)].emplace_back(literals);
+   for (unsigned int i = 2u + offset; i < parsedInstruction->num_operands; ++i)
+      literals.push_back(spirv::getOperand<unsigned>(parsedInstruction, i));
+   decorations[spirv::getOperand<spv::Id>(parsedInstruction, 0u)][spirv::getOperand<spv::Decoration>(parsedInstruction, 1u + offset)].emplace_back(literals);
 
-   return true;
+   return SPV_SUCCESS;
 }
 
-bool
+spv_result_t
 Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiterals, spv::MemoryAccessMask access)
 {
    auto const builtin = static_cast<spv::BuiltIn>(decLiterals[0u]);
@@ -3912,7 +3653,7 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
       {
          if (!dstType->isVectorOfSize(3u) || !dstType->getElementType(0u)->isUInt()) {
             _debug_printf("Builtin %u should be a vector of 3 uint\n", builtin);
-            return false;
+            return SPV_ERROR_INVALID_BINARY;
          }
          auto value = std::vector<PValue>{ vec3Func(0u), vec3Func(1u), vec3Func(2u) };
          spvValues.emplace(dstId, SpirVValue{ SpirvFile::TEMPORARY, dstType, value, { 1u, 1u, 1u } });
@@ -3920,14 +3661,14 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
       break;
    default:
       _debug_printf("Unsupported builtin %u\n", builtin);
-      return false;
+      return SPV_UNSUPPORTED;
    }
 
-   return true;
+   return SPV_SUCCESS;
 }
 
-bool
-Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, uint32_t op, uint32_t firstWord, uint32_t numWords)
+spv_result_t
+Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, uint32_t op, const spv_parsed_instruction_t *parsedInstruction)
 {
    auto getOp = [&](spv::Id id, unsigned c = 0u){
       auto searchOp = spvValues.find(id);
@@ -3953,22 +3694,18 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, uint32_t op
    case 167:
    case 168:
       {
-         if (numWords != 8) {
-            _debug_printf("OpExtInst:(s|u)_mad24 expects 8 operands but got %u\n", numWords);
-            return false;
-         }
-         auto op1 = getOp(getWord<spv::Id>(firstWord + 4u), 0u);
-         auto op2 = getOp(getWord<spv::Id>(firstWord + 5u), 0u);
-         auto op3 = getOp(getWord<spv::Id>(firstWord + 6u), 0u);
+         auto op1 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 4u), 0u);
+         auto op2 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 5u), 0u);
+         auto op3 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 6u), 0u);
          auto res = getScratch();
          mkOp3(OP_MADSP, type->getEnumType(op == 167), res, op1, op2, op3)->subOp = NV50_IR_SUBOP_MADSP(2, 2, 0); // u24 u24 u32
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, { res }, type->getPaddings() });
-         return true;
+         return SPV_SUCCESS;
       }
       break;
    }
 
-   return false;
+   return SPV_UNSUPPORTED;
 }
 
 int
