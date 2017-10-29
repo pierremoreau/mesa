@@ -376,7 +376,6 @@ private:
 
    struct nv50_ir_prog_info *info;
    const char *const binary;
-   std::unordered_map<spv::Id, std::string> extInstructions;
    spv::AddressingModel addressingModel;
    spv::MemoryModel memoryModel;
    std::unordered_map<spv::Id, EntryPoint> entryPoints;
@@ -1369,8 +1368,7 @@ Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, std:
 
 Converter::Converter(Program *prog, struct nv50_ir_prog_info *info) : BuildUtil(prog),
    info(info), binary(reinterpret_cast<const char *const>(info->bin.source)),
-   extInstructions(), addressingModel(),
-   memoryModel(), entryPoints(), decorations(), types(),
+   addressingModel(), memoryModel(), entryPoints(), decorations(), types(),
    functions(), blocks(), phiNodes(), phiMapping(), phiToMatch(),
    samplers(), sampledImages(), spvValues(), currentFuncId(0u),
    inputOffset(0u), branchesToMatch(), functionsToMatch()
@@ -1699,37 +1697,28 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpExtInstImport:
       {
-         spv::Id result = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         std::string setName = spirv::getOperand<const char*>(parsedInstruction, 1u);
-         if (setName.empty()) {
-            _debug_printf("Couldn't parse the name of OpExtInstImport\n");
-            return SPV_ERROR_INVALID_BINARY;
-         }
+         const std::string setName = spirv::getOperand<const char*>(parsedInstruction, 1u);
          if (setName != "OpenCL.std") {
-            _debug_printf("OpExtInstImport \"%s\" is unsupported\n", setName.c_str());
+            _debug_printf("Extended instruction set \"%s\" is unsupported\n", setName.c_str());
             return SPV_UNSUPPORTED;
          }
-         extInstructions.emplace(result, setName);
       }
       break;
    case spv::Op::OpExtInst:
       {
-         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto searchType = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
+         const auto id = parsedInstruction->result_id;
+         const auto searchType = types.find(parsedInstruction->type_id);
          if (searchType == types.end()) {
             _debug_printf("Couldn't find type used by OpExInst\n");
             return SPV_ERROR_INVALID_ID;
          }
-         auto searchExt = extInstructions.find(spirv::getOperand<spv::Id>(parsedInstruction, 2u));
-         if (searchExt == extInstructions.end()) {
-            _debug_printf("Couldn't find extension set used by ExtInst\n");
-            return SPV_ERROR_MISSING_EXTENSION;
-         }
          auto const op = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
-         if (searchExt->second == "OpenCL.std") {
+
+         switch (parsedInstruction->ext_inst_type) {
+         case SPV_EXT_INST_TYPE_OPENCL_STD:
             return convertOpenCLInstruction(id, searchType->second, op, parsedInstruction);
-         } else {
-            _debug_printf("Unsupported extension set: \"%s\"\n", searchExt->second.c_str());
+         default:
+            assert(false);
             return SPV_UNSUPPORTED;
          }
       }
