@@ -40,7 +40,6 @@ namespace spirv {
 
 using word = unsigned int;
 using Words = std::vector<word>;
-using Ids = std::vector<spv::Id>;
 
 static inline bool hasFlag(spv::ImageOperandsMask v, spv::ImageOperandsShift f) { return static_cast<uint32_t>(v) & (1u << static_cast<uint32_t>(f)); }
 static inline bool hasFlag(spv::FPFastMathModeMask v, spv::FPFastMathModeShift f) { return static_cast<uint32_t>(v) & (1u << static_cast<uint32_t>(f)); }
