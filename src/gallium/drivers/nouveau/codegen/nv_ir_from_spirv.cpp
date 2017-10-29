@@ -3817,6 +3817,9 @@ Converter::getImageFormat(spv::ImageFormat format)
       NV50_IR_TRANS_IMG_FORMAT(spv::ImageFormat::R16ui, R16UI)
       NV50_IR_TRANS_IMG_FORMAT(spv::ImageFormat::R8ui, R8UI)
    }
+
+#undef NV50_IR_TRANS_IMG_FORMAT
+
    return &nv50_ir::TexInstruction::formatTable[imgFormat];
 }
 
