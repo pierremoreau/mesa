@@ -102,7 +102,7 @@ public:
       PValue(Value *value) : value(value), symbol(nullptr) {}
       PValue(Symbol *symbol, Value *indirect) : symbol(symbol), indirect(indirect) {}
       bool isUndefined() const { return symbol == nullptr && value == nullptr; }
-      bool isValue() const { return value != nullptr && value->reg.file == FILE_GPR; }
+      bool isValue() const { return value != nullptr && (value->reg.file == FILE_GPR || value->reg.file == FILE_IMMEDIATE); }
    };
    class Type {
    public:
@@ -1745,6 +1745,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpDecorate:
       return convertDecorate(parsedInstruction);
    case spv::Op::OpMemberDecorate:
+      _debug_printf("OpMemberDecorate is unsupported.\n");
       return SPV_UNSUPPORTED;
    case spv::Op::OpDecorationGroup:
       break;
@@ -2940,16 +2941,20 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          auto value = std::vector<PValue>();
          if (type->second->getElementsNb() == 1u) {
             auto op = getOp(opId, 0u);
-            if (op.isUndefined())
+            if (op.isUndefined()) {
+               _debug_printf("Coudln't find op with id %u\n", opId);
                return SPV_ERROR_INVALID_LOOKUP;
+            }
 
             auto *tmp = mkOp1v(operation, type->second->getEnumType(), getScratch(op.value->reg.size), op.value);
             value.push_back(tmp);
          } else {
             for (unsigned int i = 0u; i < type->second->getElementsNb(); ++i) {
                auto op = getOp(opId, i + 1u);
-               if (op.isUndefined())
+               if (op.isUndefined()) {
+                  _debug_printf("Coudln't find op with id %u\n", opId);
                   return SPV_ERROR_INVALID_LOOKUP;
+               }
 
                auto *tmp = mkOp1v(operation, type->second->getElementEnumType(i), getScratch(op.value->reg.size), op.value);
                value.push_back(tmp);
@@ -3310,6 +3315,16 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, value, type->second->getPaddings() });
       }
       break;
+   case spv::Op::OpVectorShuffle:
+      {
+         const spv::Id resId = parsedInstruction->result_id;
+         const spv::Id typeId = parsedInstruction->type_id;
+         const spv::Id vector1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         const spv::Id vector2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
+         _debug_printf("OpVectorShuffle is not implemented yet.\n");
+         return SPV_UNSUPPORTED;
+      }
+      break;
    case spv::Op::OpUConvert:
    case spv::Op::OpSConvert:
    case spv::Op::OpConvertUToF:
@@ -3502,6 +3517,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       }
       break;
    default:
+      _debug_printf("Unsupported opcode %u\n", opcode);
       return SPV_UNSUPPORTED;
    }
 
