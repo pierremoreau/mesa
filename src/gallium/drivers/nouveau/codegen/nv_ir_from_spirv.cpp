@@ -2596,8 +2596,8 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
                return SPV_ERROR_INVALID_LOOKUP;
             }
             auto src = value[offset].value;
-            dst = getScratch(type->second->getSize());
-            mkMov(dst, src, type->second->getEnumType());
+            dst = getScratch(std::max(4u, type->second->getSize()));
+            mkMov(dst, src, typeOfSize(std::max(4u, typeSizeof(type->second->getEnumType()))));
             spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, { dst }, type->second->getPaddings() });
          } else {
             load(SpirvFile::TEMPORARY, baseStruct.storageFile, baseId, PValue(), offset, baseType);
@@ -2650,11 +2650,11 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             }
             auto res = std::vector<PValue>(value.size());
             for (unsigned int i = 0u; i < value.size(); ++i) {
-               res[i] = getScratch(type->second->getElementSize(i));
+               res[i] = getScratch(std::max(4u, type->second->getElementSize(i)));
                if (i != offset)
-                  mkMov(res[i].value, value[i].value, type->second->getElementEnumType(i));
+                  mkMov(res[i].value, value[i].value, typeOfSize(std::max(4u, typeSizeof(type->second->getEnumType()))));
                else
-                  mkMov(res[i].value, obj.value, type->second->getElementEnumType(i));
+                  mkMov(res[i].value, obj.value, typeOfSize(std::max(4u, typeSizeof(type->second->getEnumType()))));
             }
             spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, res, type->second->getPaddings() });
          } else {
