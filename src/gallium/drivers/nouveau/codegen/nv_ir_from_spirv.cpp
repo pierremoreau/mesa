@@ -3321,8 +3321,42 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const spv::Id typeId = parsedInstruction->type_id;
          const spv::Id vector1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
          const spv::Id vector2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
-         _debug_printf("OpVectorShuffle is not implemented yet.\n");
-         return SPV_UNSUPPORTED;
+
+         auto searchVector1 = spvValues.find(vector1Id);
+         if (searchVector1 == spvValues.end()) {
+            _debug_printf("Failed to find var with id %u\n", vector1Id);
+            return SPV_ERROR_INVALID_LOOKUP;
+         }
+         auto searchVector2 = spvValues.find(vector2Id);
+         if (searchVector2 == spvValues.end()) {
+            _debug_printf("Failed to find var with id %u\n", vector2Id);
+            return SPV_ERROR_INVALID_LOOKUP;
+         }
+         const Type *vector1Type = searchVector1->second.type;
+
+         auto searchResType = types.find(typeId);
+         if (searchResType == types.end()) {
+            _debug_printf("Failed to find type with id %u\n", typeId);
+            return SPV_ERROR_INVALID_LOOKUP;
+         }
+         const Type *resType = searchResType->second;
+
+         std::vector<PValue> values;
+         for (uint16_t i = 4u; i < parsedInstruction->num_operands; ++i) {
+            const word componentIndex = spirv::getOperand<word>(parsedInstruction, i);
+            if (componentIndex == UINT32_MAX) {
+               Value *dst = getScratch(std::max(4u, resType->getElementSize(i - 4u)));
+               values.emplace_back(dst);
+               continue;
+            }
+
+            const auto src = componentIndex < vector1Type->getElementsNb() ? searchVector1->second.value[componentIndex].value
+                                                                           : searchVector2->second.value[componentIndex - vector1Type->getElementsNb()].value;
+            Value *dst = getScratch(typeOfSize(std::max(static_cast<uint8_t>(4u), src->reg.size)));
+            mkMov(dst, src, typeOfSize(std::max(4u, typeSizeof(src->reg.type))));
+            values.emplace_back(dst);
+         }
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
       }
       break;
    case spv::Op::OpUConvert:
