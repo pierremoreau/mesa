@@ -804,7 +804,7 @@ Converter::TypeVector::TypeVector(const spv_parsed_instruction_t *const parsedIn
    }
    component_type = search->second;
    elements_nb = spirv::getOperand<unsigned>(parsedInstruction, 2u);
-   alignment = component_type->getAlignment();
+   alignment = (elements_nb != 3u) ? elements_nb * component_type->getSize() : 4u * component_type->getSize();
    didSucceed = true;
 }
 
@@ -833,7 +833,7 @@ unsigned int
 Converter::TypeVector::getSize(void) const
 {
    assert(component_type != nullptr);
-   return component_type->getSize() * elements_nb;
+   return component_type->getSize() * ((elements_nb != 3u) ? elements_nb : 4u);
 }
 
 Converter::Type const*
@@ -1340,7 +1340,7 @@ Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, std:
                mkOp2(OP_SHL, TYPE_U32, tmp, value, immVal); // FIXME sign of shift op
             }
 
-            Value *mask = (elemSize == 1u) ? mkImm(0xffu) : mkImm(0xffffu);
+            Value *mask = (elemSize == 1u) ? mkImm(0xffu << (elemSize * mod)) : mkImm(0xffffu << (elemSize * mod));
             Value *maskVal = getScratch();
             mkMov(maskVal, mask, TYPE_U32);
             mkOp2(OP_AND, TYPE_U32, tmp, (mod == 0u) ? value : tmp, maskVal);
