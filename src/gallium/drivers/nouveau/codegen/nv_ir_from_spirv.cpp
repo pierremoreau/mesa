@@ -138,6 +138,9 @@ public:
       std::vector<PValue> value;
       std::vector<unsigned int> paddings; // How to align each component: this will be used by OpCopyMemory* for example
       bool is_packed;
+      SpirVValue() : storageFile(SpirvFile::NONE), type(nullptr), value(), paddings(), is_packed(false) {}
+      SpirVValue(SpirvFile sf, const Type *t, const std::vector<PValue> &v, const std::vector<unsigned int> &p, bool ip = false) : storageFile(sf), type(t), value(v), paddings(p), is_packed(ip) {}
+      bool isUndefined() const { return type == nullptr; }
    };
    using ValueMap = std::unordered_map<spv::Id, SpirVValue>;
    class TypeVoid : public Type {
@@ -1634,6 +1637,10 @@ Converter::convertCc(spv::Op op)
 spv_result_t
 Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 {
+   auto getStruct = [&](spv::Id id){
+      auto searchStruct = spvValues.find(id);
+      return (searchStruct != spvValues.end()) ? searchStruct->second : SpirVValue{};
+   };
    auto getOp = [&](spv::Id id, unsigned c = 0u, bool constants_allowed = true){
       auto searchOp = spvValues.find(id);
       if (searchOp == spvValues.end())
@@ -1657,21 +1664,12 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       }
       return pvalue;
    };
-   auto getType = [&](spv::Id id, unsigned c = 0u){
-      auto searchType = spvValues.find(id);
-      if (searchType != spvValues.end()) {
-         auto& opStruct = searchType->second;
-         if (c < opStruct.value.size()) {
-            if (opStruct.value.size() == 1)
-               return opStruct.type;
-            else
-               return opStruct.type->getElementType(c);
-         }
-         _debug_printf("Trying to access element %u out of %u\n", c, opStruct.value.size());
-         return static_cast<Type const*>(nullptr);
-      }
-
-      return static_cast<Type const*>(nullptr);
+   auto getType = [&](spv::Id id){
+      auto searchType = types.find(id);
+      if (searchType == types.end())
+         return static_cast<const Type*>(nullptr);
+      else
+         return static_cast<const Type*>(searchType->second);
    };
 
    const spv::Op opcode = static_cast<spv::Op>(parsedInstruction->opcode);
@@ -2606,61 +2604,35 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpCompositeInsert:
       {
-         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto objId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto baseId = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
-
-         auto obj = getOp(objId);
-         if (obj.isUndefined()) {
-            _debug_printf("Couldn't find obj with id %u\n", objId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         auto searchBaseStruct = spvValues.find(baseId);
-         if (searchBaseStruct == spvValues.end()) {
-            _debug_printf("Couldn't find base with id %u\n", baseId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto& baseStruct = searchBaseStruct->second;
-         auto base = baseStruct.value[0];
-
-         auto type = types.find(typeId);
-         if (type == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto baseType = baseStruct.type;
-
-         auto ids = std::vector<unsigned int>();
-         for (unsigned int i = 4u; i < parsedInstruction->num_operands; ++i)
+         const spv::Id typeId = parsedInstruction->type_id;
+         const spv::Id resId = parsedInstruction->result_id;
+         const spv::Id objId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         const spv::Id baseId = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
+         std::vector<unsigned int> ids;
+         for (uint16_t i = 4u; i < parsedInstruction->num_operands; ++i)
             ids.push_back(spirv::getOperand<unsigned int>(parsedInstruction, i));
-         auto offset = baseType->getGlobalIdx(ids);
 
-         if (base.isValue()) {
-            auto searchSrc = spvValues.find(baseId);
-            if (searchSrc == spvValues.end()) {
-               _debug_printf("Member %u of id %u couldn't be found\n", offset, baseId);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-            auto& value = searchSrc->second.value;
-            if (offset >= value.size()) {
-               _debug_printf("Trying to access member %u out of %u\n", offset, value.size());
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-            auto res = std::vector<PValue>(value.size());
-            for (unsigned int i = 0u; i < value.size(); ++i) {
-               res[i] = getScratch(std::max(4u, type->second->getElementSize(i)));
-               if (i != offset)
-                  mkMov(res[i].value, value[i].value, typeOfSize(std::max(4u, typeSizeof(type->second->getEnumType()))));
-               else
-                  mkMov(res[i].value, obj.value, typeOfSize(std::max(4u, typeSizeof(type->second->getEnumType()))));
-            }
-            spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, res, type->second->getPaddings() });
-         } else {
-            _debug_printf("OpCompositeInsert is not supported yet on non-reg stored values\n");
-            return SPV_UNSUPPORTED;
+         const PValue obj = getOp(objId);
+         assert(!obj.isUndefined());
+
+         const SpirVValue &baseStruct = getStruct(baseId);
+         assert(!baseStruct.isUndefined());
+         const std::vector<PValue> &baseValues = baseStruct.value;
+         const Type *baseType = baseStruct.type;
+
+         const Type *returnType = getType(typeId);
+         assert(returnType != nullptr);
+         const unsigned int offset = baseType->getGlobalIdx(ids);
+         assert(offset < baseValues.size());
+
+         std::vector<PValue> res(baseValues.size());
+         for (unsigned int i = 0u; i < baseValues.size(); ++i) {
+            const unsigned int resultSize = std::max(4u, returnType->getElementSize(i));
+            Value *src = (i != offset) ? baseValues[i].value : obj.value;
+            res[i] = getScratch(resultSize);
+            mkMov(res[i].value, src, typeOfSize(resultSize));
          }
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, returnType, res, returnType->getPaddings() });
       }
       break;
    case spv::Op::OpBitcast:
@@ -3384,7 +3356,8 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             return SPV_ERROR_INVALID_LOOKUP;
          }
 
-         auto srcType = getType(srcId);
+         auto srcStruct = getStruct(srcId);
+         auto srcType = srcStruct.type;
          if (srcType == nullptr) {
              _debug_printf("Couldn't find type for id %u\n", srcId);
              return SPV_ERROR_INVALID_LOOKUP;
