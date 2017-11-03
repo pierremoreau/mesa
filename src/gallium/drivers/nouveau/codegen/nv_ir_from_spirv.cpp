@@ -1211,7 +1211,7 @@ Converter::load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& 
             // TODO make use of MemoryAccess::Nontemporal
             const auto enumType = typeOfSize(size);
             const auto gprSize = std::max(4u, size);
-            if (srcFile == SpirvFile::IMMEDIATE || (ptr.indirect != nullptr && ptr.indirect->reg.file == FILE_IMMEDIATE)) {
+            if (srcFile == SpirvFile::IMMEDIATE || srcFile == SpirvFile::TEMPORARY || (ptr.indirect != nullptr && ptr.indirect->reg.file == FILE_IMMEDIATE)) {
                res = getScratch(gprSize);
                res->reg.type = enumType;
                mkMov(res, ptr.indirect, enumType);
@@ -1273,11 +1273,11 @@ Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, Valu
    Value *realValue = value;
    if (value->reg.file == FILE_IMMEDIATE) {
       realValue = getScratch(value->reg.size);
-      mkMov(realValue, value, value->reg.type);
+      mkMov(realValue, value, typeOfSize(value->reg.size));
    }
 
    if (dstFile == SpirvFile::TEMPORARY) {
-      mkMov(ptr.indirect, realValue, realValue->reg.type);
+      mkMov(ptr.indirect, realValue, typeOfSize(value->reg.size));
       return;
    }
 
