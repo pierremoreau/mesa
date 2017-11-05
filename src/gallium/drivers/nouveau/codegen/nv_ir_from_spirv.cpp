@@ -1175,6 +1175,7 @@ Converter::load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& 
 
    const bool hasLoadAlignment = hasFlag(access, spv::MemoryAccessShift::Aligned);
    std::uint32_t localOffset = offset;
+
    std::stack<Type const*> stack;
    stack.push(type);
 
@@ -1272,68 +1273,64 @@ Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, std:
 {
    assert(type != nullptr);
 
-   const auto hasStoreAlignment = hasFlag(access, spv::MemoryAccessShift::Aligned);
-   unsigned processedAlignment = 0u;
-   auto localOffset = offset;
+   const bool hasStoreAlignment = hasFlag(access, spv::MemoryAccessShift::Aligned);
+   std::uint32_t localOffset = offset;
+   std::uint32_t c = 0u;
+
    std::stack<Type const*> stack;
    stack.push(type);
-   Value *coalescedStore = nullptr;
-   unsigned int c = 0u;
+
    while (!stack.empty()) {
-      unsigned deltaOffset = 0u;
-      Value *value = values[c].value;
       auto currentType = stack.top();
       stack.pop();
+
       if (!currentType->isCompooundType()) {
-         if (hasStoreAlignment && processedAlignment >= alignment) {
-            const auto mod = processedAlignment % alignment;
-            if (mod)
-               deltaOffset += alignment - mod;
-            processedAlignment = 0u;
+         const std::uint32_t elemByteSize = currentType->getSize();
+         const std::uint32_t dstByteSize = std::max(4u, elemByteSize);
+
+         const std::uint32_t typeAlignment = !hasStoreAlignment ? elemByteSize : alignment;
+
+         // Pad the current offset, if needed, in order to have this new access
+         // correctly aligned to the custom alignment, if provided, or the
+         // type’s size.
+         const std::uint32_t alignmentDelta = localOffset % typeAlignment;
+         if (alignmentDelta != 0u)
+            localOffset += typeAlignment - alignmentDelta;
+         assert(typeAlignment >= elemByteSize);
+
+         assert(c <= values.size());
+         Value *value = values[c].value;
+
+         const DataType elemEnumType = currentType->getEnumType();
+         const DataType dstEnumType = typeOfSize(dstByteSize);
+
+         // If we have an immediate as input, move it first into a register.
+         if (value->reg.file == FILE_IMMEDIATE) {
+            Value *immValue = getScratch(dstByteSize);
+            mkMov(immValue, value, dstEnumType);
+            value = immValue;
          }
 
-         const auto elemByteSize = currentType->getSize();
-         const auto elemBitSize = elemByteSize * 8u;
-         auto mod = (localOffset + deltaOffset) % elemByteSize;
-         if (mod)
-            deltaOffset += elemByteSize - mod;
-         localOffset += deltaOffset;
-         processedAlignment += deltaOffset;
+         Instruction *insn = nullptr;
+         if (dstFile == SpirvFile::TEMPORARY) {
+            insn = mkMov(ptr.indirect, value, elemEnumType);
+         } else {
+            Symbol *sym = ptr.symbol;
+            if (sym == nullptr)
+               sym = createSymbol(dstFile, elemEnumType, elemByteSize, localOffset);
 
-         const auto size = std::max(4u, elemByteSize);
-         mod = localOffset % size;
-         const auto nbBitsOffset = mod * elemBitSize;
-
-         if (elemByteSize != size) {
-            Value *tmp = getScratch();
-            if (mod != 0u) {
-               Value *imm = mkImm(nbBitsOffset);
-               Value *immVal = getScratch();
-               mkMov(immVal, imm, TYPE_U32);
-               mkOp2(OP_SHL, TYPE_U32, tmp, value, immVal); // FIXME sign of shift op
-            }
-
-            Value *mask = (elemByteSize == 1u) ? mkImm(0xffu << nbBitsOffset) : mkImm(0xffffu << nbBitsOffset);
-            Value *maskVal = getScratch();
-            mkMov(maskVal, mask, TYPE_U32);
-            mkOp2(OP_AND, TYPE_U32, tmp, (mod == 0u) ? value : tmp, maskVal);
-
-            if (mod == 0u) {
-               coalescedStore = getScratch();
-               mkMov(coalescedStore, tmp, TYPE_U32);
-            } else {
-               mkOp2(OP_OR, TYPE_U32, coalescedStore, coalescedStore, tmp);
-            }
+            // TODO(pmoreau): This is a hack to get the proper offset on Tesla
+            Value *tmp = nullptr;
+            if (info->target >= 0xc0)
+               tmp = ptr.indirect;
+            else
+               tmp = mkOp2v(OP_ADD, ptr.indirect->reg.type, getScratch(ptr.indirect->reg.size), ptr.indirect, loadImm(nullptr, localOffset));
+            insn = mkStore(OP_STORE, elemEnumType, sym, tmp, value);
          }
-
-         // We coalesce as many elements as possible to get a store of at least
-         // 32 bits, and use shifts and ORs to properly compose the coalesced
-         // value to store.
-         if (size == elemByteSize || mod + 1u == size || stack.empty())
-            store(dstFile, ptr, localOffset - mod * elemByteSize, (size == elemByteSize) ? value : coalescedStore, (size == elemByteSize) ? typeOfSize(size) : typeOfSize(elemByteSize), access, alignment);
+         if (hasFlag(access, spv::MemoryAccessShift::Volatile))
+            insn->fixed = 1;
 
          localOffset += elemByteSize;
-         processedAlignment += elemByteSize;
          ++c;
       } else {
          for (unsigned int i = currentType->getElementsNb(); i != 0u; --i)
