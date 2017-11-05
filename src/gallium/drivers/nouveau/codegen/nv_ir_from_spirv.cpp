@@ -1163,8 +1163,6 @@ Converter::acquire(SpirvFile file, spv::Id id, Type const* type)
 }
 
 // TODO(pmoreau):
-// * Should the coalescing from 8-bit to 32-bit be done in common code instead?
-// * Clean up everything
 // * Make sure to handle all alignment/padding/weird cases properly
 // * Handle all different MemoryAccess
 // * Handle loads from one memory space to another one?
@@ -1173,87 +1171,55 @@ Converter::load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& 
 {
    assert(type != nullptr);
 
-   auto values = std::vector<PValue>();
+   std::vector<PValue> values;
 
-   const auto hasLoadAlignment = hasFlag(access, spv::MemoryAccessShift::Aligned);
-   unsigned processedAlignment = 0u;
-   auto localOffset = offset;
+   const bool hasLoadAlignment = hasFlag(access, spv::MemoryAccessShift::Aligned);
+   std::uint32_t localOffset = offset;
    std::stack<Type const*> stack;
    stack.push(type);
-   Value *coalescedLoad = nullptr;
+
    while (!stack.empty()) {
-      unsigned deltaOffset = 0u;
-      auto currentType = stack.top();
+      const Type *currentType = stack.top();
       stack.pop();
+
       if (!currentType->isCompooundType()) {
-         if (hasLoadAlignment && processedAlignment >= alignment) {
-            const auto mod = processedAlignment % alignment;
-            if (mod)
-               deltaOffset += alignment - mod;
-            processedAlignment = 0u;
+         const std::uint32_t elemByteSize = currentType->getSize();
+         const std::uint32_t elemBitSize = elemByteSize * 8u;
+
+         const std::uint32_t typeAlignment = !hasLoadAlignment ? elemByteSize : alignment;
+
+         // Pad the current offset, if needed, in order to have this new access
+         // correctly aligned to the custom alignment, if provided, or the
+         // type’s size.
+         const std::uint32_t alignmentDelta = localOffset % typeAlignment;
+         if (alignmentDelta != 0u)
+            localOffset += typeAlignment - alignmentDelta;
+         assert(typeAlignment >= elemByteSize);
+
+         const std::uint32_t destByteSize = std::max(4u, elemByteSize);
+         const bool srcInGPR = srcFile == SpirvFile::IMMEDIATE || srcFile == SpirvFile::TEMPORARY ||
+                               (ptr.indirect != nullptr && ptr.indirect->reg.file == FILE_IMMEDIATE);
+
+         const DataType destEnumType = typeOfSize(destByteSize);
+         const DataType elemEnumType = currentType->getEnumType();
+         Value *res = getScratch(destByteSize);
+         res->reg.type = elemEnumType; // Might not be needed; could be used to track false U8 values.
+
+         Instruction *insn = nullptr;
+         if (srcInGPR) {
+            insn = mkMov(res, ptr.indirect, destEnumType);
+         } else {
+            Symbol *sym = ptr.symbol;
+            if (sym == nullptr)
+               sym = createSymbol(srcFile, elemEnumType, elemByteSize, localOffset);
+
+            insn = mkLoad(elemEnumType, res, sym, ptr.indirect);
          }
-
-         const auto elemByteSize = currentType->getSize();
-         const auto elemBitSize = elemByteSize * 8u;
-         auto mod = (localOffset + deltaOffset) % elemByteSize;
-         if (mod)
-            deltaOffset += elemByteSize - mod;
-         localOffset += deltaOffset;
-         processedAlignment += deltaOffset;
-
-         const auto destByteSize = std::max(4u, elemByteSize);
-         const auto size = elemByteSize;
-         mod = localOffset % size;
-         const auto nbBitsOffset = mod * elemBitSize;
-
-         const bool storedInGPR = srcFile == SpirvFile::IMMEDIATE || srcFile == SpirvFile::TEMPORARY || (ptr.indirect != nullptr && ptr.indirect->reg.file == FILE_IMMEDIATE);
-
-         Value *res = nullptr;
-         // We coalesce as many elements as possible to get a load of at least
-         // 32 bits, and use shifts and ANDs to properly split the coalesced
-         // results.
-         if (mod == 0u) {
-            // TODO make use of MemoryAccess::Nontemporal
-            const auto enumType = typeOfSize(storedInGPR ? destByteSize : size);
-            res = getScratch(destByteSize);
-            res->reg.type = enumType;
-            if (storedInGPR) {
-               mkMov(res, ptr.indirect, enumType);
-            } else {
-               Symbol *sym = ptr.symbol;
-               if (sym == nullptr)
-                  sym = createSymbol(srcFile, enumType, size, localOffset);
-
-               Instruction* insn = mkLoad(enumType, res, sym, ptr.indirect);
-               if (hasFlag(access, spv::MemoryAccessShift::Volatile))
-                  insn->fixed = 1;
-            }
-
-            if (elemByteSize != size)
-               coalescedLoad = res;
-         }
-
-         if (elemByteSize != size) {
-            res = getScratch();
-            mkMov(res, coalescedLoad, TYPE_U32);
-            if (mod != 0u) {
-               Value *imm = mkImm(nbBitsOffset);
-               Value *immVal = getScratch();
-               mkMov(immVal, imm, TYPE_U32);
-               mkOp2(OP_SHR, TYPE_U32, res, res, immVal); // FIXME sign of shift op
-            }
-            Value *mask = (elemByteSize == 1u) ? mkImm(0xffu << nbBitsOffset) : mkImm(0xffffu << nbBitsOffset);
-            Value *maskVal = getScratch();
-            mkMov(maskVal, mask, TYPE_U32);
-            mkOp2(OP_AND, TYPE_U32, res, res, maskVal);
-         }
+         if (hasFlag(access, spv::MemoryAccessShift::Volatile))
+            insn->fixed = 1;
 
          localOffset += elemByteSize;
-         processedAlignment += elemByteSize;
-         if (res->reg.file == FILE_GPR)
-            values.push_back(res);
-         else
-            values.emplace_back(res->asSym(), nullptr);
+         values.push_back(res);
       } else {
          for (unsigned int i = currentType->getElementsNb(); i != 0u; --i)
             stack.push(currentType->getElementType(i - 1u));
@@ -1274,11 +1240,15 @@ Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, Valu
    Value *realValue = value;
    if (value->reg.file == FILE_IMMEDIATE) {
       realValue = getScratch(value->reg.size);
-      mkMov(realValue, value, typeOfSize(value->reg.size));
+      Instruction *insn = mkMov(realValue, value, typeOfSize(value->reg.size));
+      if (hasFlag(access, spv::MemoryAccessShift::Volatile))
+         insn->fixed = 1;
    }
 
    if (dstFile == SpirvFile::TEMPORARY) {
-      mkMov(ptr.indirect, realValue, typeOfSize(value->reg.size));
+      Instruction *insn = mkMov(ptr.indirect, realValue, typeOfSize(value->reg.size));
+      if (hasFlag(access, spv::MemoryAccessShift::Volatile))
+         insn->fixed = 1;
       return;
    }
 
