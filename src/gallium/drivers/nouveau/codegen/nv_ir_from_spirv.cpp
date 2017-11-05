@@ -1193,15 +1193,20 @@ Converter::load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& 
             processedAlignment = 0u;
          }
 
-         const auto elemSize = currentType->getSize();
-         auto mod = (localOffset + deltaOffset) % elemSize;
+         const auto elemByteSize = currentType->getSize();
+         const auto elemBitSize = elemByteSize * 8u;
+         auto mod = (localOffset + deltaOffset) % elemByteSize;
          if (mod)
-            deltaOffset += elemSize - mod;
+            deltaOffset += elemByteSize - mod;
          localOffset += deltaOffset;
          processedAlignment += deltaOffset;
 
-         const auto size = elemSize;
+         const auto destByteSize = std::max(4u, elemByteSize);
+         const auto size = elemByteSize;
          mod = localOffset % size;
+         const auto nbBitsOffset = mod * elemBitSize;
+
+         const bool storedInGPR = srcFile == SpirvFile::IMMEDIATE || srcFile == SpirvFile::TEMPORARY || (ptr.indirect != nullptr && ptr.indirect->reg.file == FILE_IMMEDIATE);
 
          Value *res = nullptr;
          // We coalesce as many elements as possible to get a load of at least
@@ -1209,46 +1214,42 @@ Converter::load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& 
          // results.
          if (mod == 0u) {
             // TODO make use of MemoryAccess::Nontemporal
-            const auto enumType = typeOfSize(size);
-            const auto gprSize = std::max(4u, size);
-            if (srcFile == SpirvFile::IMMEDIATE || srcFile == SpirvFile::TEMPORARY || (ptr.indirect != nullptr && ptr.indirect->reg.file == FILE_IMMEDIATE)) {
-               res = getScratch(gprSize);
-               res->reg.type = enumType;
+            const auto enumType = typeOfSize(storedInGPR ? destByteSize : size);
+            res = getScratch(destByteSize);
+            res->reg.type = enumType;
+            if (storedInGPR) {
                mkMov(res, ptr.indirect, enumType);
             } else {
                Symbol *sym = ptr.symbol;
                if (sym == nullptr)
                   sym = createSymbol(srcFile, enumType, size, localOffset);
 
-               res = getScratch(gprSize);
-               res->reg.type = enumType;
-               Instruction* insn = nullptr;
-               insn = mkLoad(enumType, res, sym, ptr.indirect);
+               Instruction* insn = mkLoad(enumType, res, sym, ptr.indirect);
                if (hasFlag(access, spv::MemoryAccessShift::Volatile))
                   insn->fixed = 1;
             }
 
-            if (elemSize != size)
+            if (elemByteSize != size)
                coalescedLoad = res;
          }
 
-         if (elemSize != size) {
+         if (elemByteSize != size) {
             res = getScratch();
             mkMov(res, coalescedLoad, TYPE_U32);
             if (mod != 0u) {
-               Value *imm = mkImm(mod * (elemSize * 8u));
+               Value *imm = mkImm(nbBitsOffset);
                Value *immVal = getScratch();
                mkMov(immVal, imm, TYPE_U32);
                mkOp2(OP_SHR, TYPE_U32, res, res, immVal); // FIXME sign of shift op
             }
-            Value *mask = (elemSize == 1u) ? mkImm(0xffu) : mkImm(0xffffu);
+            Value *mask = (elemByteSize == 1u) ? mkImm(0xffu << nbBitsOffset) : mkImm(0xffffu << nbBitsOffset);
             Value *maskVal = getScratch();
             mkMov(maskVal, mask, TYPE_U32);
             mkOp2(OP_AND, TYPE_U32, res, res, maskVal);
          }
 
-         localOffset += elemSize;
-         processedAlignment += elemSize;
+         localOffset += elemByteSize;
+         processedAlignment += elemByteSize;
          if (res->reg.file == FILE_GPR)
             values.push_back(res);
          else
@@ -1321,26 +1322,28 @@ Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, std:
             processedAlignment = 0u;
          }
 
-         const auto elemSize = currentType->getSize();
-         auto mod = (localOffset + deltaOffset) % elemSize;
+         const auto elemByteSize = currentType->getSize();
+         const auto elemBitSize = elemByteSize * 8u;
+         auto mod = (localOffset + deltaOffset) % elemByteSize;
          if (mod)
-            deltaOffset += elemSize - mod;
+            deltaOffset += elemByteSize - mod;
          localOffset += deltaOffset;
          processedAlignment += deltaOffset;
 
-         const auto size = std::max(4u, elemSize);
+         const auto size = std::max(4u, elemByteSize);
          mod = localOffset % size;
+         const auto nbBitsOffset = mod * elemBitSize;
 
-         if (elemSize != size) {
+         if (elemByteSize != size) {
             Value *tmp = getScratch();
             if (mod != 0u) {
-               Value *imm = mkImm(mod * (elemSize * 8u));
+               Value *imm = mkImm(nbBitsOffset);
                Value *immVal = getScratch();
                mkMov(immVal, imm, TYPE_U32);
                mkOp2(OP_SHL, TYPE_U32, tmp, value, immVal); // FIXME sign of shift op
             }
 
-            Value *mask = (elemSize == 1u) ? mkImm(0xffu << (elemSize * mod)) : mkImm(0xffffu << (elemSize * mod));
+            Value *mask = (elemByteSize == 1u) ? mkImm(0xffu << nbBitsOffset) : mkImm(0xffffu << nbBitsOffset);
             Value *maskVal = getScratch();
             mkMov(maskVal, mask, TYPE_U32);
             mkOp2(OP_AND, TYPE_U32, tmp, (mod == 0u) ? value : tmp, maskVal);
@@ -1356,11 +1359,11 @@ Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, std:
          // We coalesce as many elements as possible to get a store of at least
          // 32 bits, and use shifts and ORs to properly compose the coalesced
          // value to store.
-         if (size == elemSize || mod + 1u == size || stack.empty())
-            store(dstFile, ptr, localOffset - mod * elemSize, (size == elemSize) ? value : coalescedStore, (size == elemSize) ? typeOfSize(size) : typeOfSize(elemSize), access, alignment);
+         if (size == elemByteSize || mod + 1u == size || stack.empty())
+            store(dstFile, ptr, localOffset - mod * elemByteSize, (size == elemByteSize) ? value : coalescedStore, (size == elemByteSize) ? typeOfSize(size) : typeOfSize(elemByteSize), access, alignment);
 
-         localOffset += elemSize;
-         processedAlignment += elemSize;
+         localOffset += elemByteSize;
+         processedAlignment += elemByteSize;
          ++c;
       } else {
          for (unsigned int i = currentType->getElementsNb(); i != 0u; --i)
