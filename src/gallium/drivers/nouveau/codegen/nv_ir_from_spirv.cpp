@@ -373,9 +373,9 @@ private:
 
    Value * acquire(SpirvFile dstFile, Type const* type);
    Value *acquire(SpirvFile file, spv::Id id, Type const* type);
-   unsigned load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& ptr, unsigned int offset, Type const* type, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone, uint32_t alignment = 0u);
+   unsigned load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, const std::vector<PValue> &ptrs, unsigned int offset, Type const* type, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone, uint32_t alignment = 0u);
    void store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, Value *value, DataType stTy, spv::MemoryAccessMask access, uint32_t alignment);
-   void store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, std::vector<PValue> const& values, Type const* type, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone, uint32_t alignment = 0u);
+   void store(SpirvFile dstFile, const std::vector<PValue> &ptrs, unsigned int offset, std::vector<PValue> const& values, Type const* type, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone, uint32_t alignment = 0u);
 
    struct nv50_ir_prog_info *info;
    const char *const binary;
@@ -1166,8 +1166,9 @@ Converter::acquire(SpirvFile file, spv::Id id, Type const* type)
 // * Make sure to handle all alignment/padding/weird cases properly
 // * Handle all different MemoryAccess
 // * Handle loads from one memory space to another one?
+// * loads should?/could be emited with a size of alignment.
 unsigned
-Converter::load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& ptr, unsigned int offset, Type const* type, spv::MemoryAccessMask access, uint32_t alignment)
+Converter::load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, const std::vector<PValue> &ptrs, unsigned int offset, Type const* type, spv::MemoryAccessMask access, uint32_t alignment)
 {
    assert(type != nullptr);
 
@@ -1198,8 +1199,9 @@ Converter::load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& 
          assert(typeAlignment >= elemByteSize);
 
          const std::uint32_t destByteSize = std::max(4u, elemByteSize);
+         const PValue &ptrTmp = ptrs[0u];
          const bool srcInGPR = srcFile == SpirvFile::IMMEDIATE || srcFile == SpirvFile::TEMPORARY ||
-                               (ptr.indirect != nullptr && ptr.indirect->reg.file == FILE_IMMEDIATE);
+                               (ptrTmp.indirect != nullptr && ptrTmp.indirect->reg.file == FILE_IMMEDIATE);
 
          const DataType destEnumType = typeOfSize(destByteSize);
          const DataType elemEnumType = currentType->getEnumType();
@@ -1208,8 +1210,12 @@ Converter::load(SpirvFile dstFile, SpirvFile srcFile, spv::Id id, PValue const& 
 
          Instruction *insn = nullptr;
          if (srcInGPR) {
+            const std::uint32_t c = static_cast<std::uint32_t>(values.size());
+            assert(c < ptrs.size());
+            const PValue &ptr = ptrs[c];
             insn = mkMov(res, ptr.indirect, destEnumType);
          } else {
+            const PValue &ptr = ptrs[0u];
             Symbol *sym = ptr.symbol;
             if (sym == nullptr)
                sym = createSymbol(srcFile, elemEnumType, elemByteSize, localOffset);
@@ -1268,8 +1274,10 @@ Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, Valu
       insn->fixed = 1;
 }
 
+// TODO(pmoreau):
+// * stores should?/could be emited with a size of alignment.
 void
-Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, std::vector<PValue> const& values, Type const* type, spv::MemoryAccessMask access, uint32_t alignment)
+Converter::store(SpirvFile dstFile, const std::vector<PValue> &ptrs, unsigned int offset, std::vector<PValue> const& values, Type const* type, spv::MemoryAccessMask access, uint32_t alignment)
 {
    assert(type != nullptr);
 
@@ -1313,8 +1321,11 @@ Converter::store(SpirvFile dstFile, PValue const& ptr, unsigned int offset, std:
 
          Instruction *insn = nullptr;
          if (dstFile == SpirvFile::TEMPORARY) {
-            insn = mkMov(ptr.indirect, value, elemEnumType);
+            assert(c < ptrs.size());
+            const PValue &ptr = ptrs[c];
+            insn = mkMov(ptr.indirect, value, dstEnumType);
          } else {
+            const PValue &ptr = ptrs[0u];
             Symbol *sym = ptr.symbol;
             if (sym == nullptr)
                sym = createSymbol(dstFile, elemEnumType, elemByteSize, localOffset);
@@ -1972,7 +1983,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             }
          }
          if (isKernel) {
-            inputOffset += load(destStorageFile, SpirvFile::INPUT, id, PValue(nullptr, nullptr), inputOffset, paramType);
+            inputOffset += load(destStorageFile, SpirvFile::INPUT, id, { PValue() }, inputOffset, paramType);
             spvValues[id].type = search->second;
          } else {
             std::vector<PValue> values;
@@ -2402,7 +2413,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          }
 
          auto pointer_type = reinterpret_cast<const TypePointer *>(search_pointer->second.type);
-         load(SpirvFile::TEMPORARY, pointer_type->getStorageFile(), resId, search_pointer->second.value[0], 0u, type, access, alignment);
+         load(SpirvFile::TEMPORARY, pointer_type->getStorageFile(), resId, search_pointer->second.value, 0u, type, access, alignment);
       }
       break;
    case spv::Op::OpStore:
@@ -2430,7 +2441,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          }
 
          auto value = searchElementStruct->second.value;
-         store(pointer_type->getStorageFile(), search_pointer->second.value[0], 0u, value, pointer_type->getPointedType(), access, alignment);
+         store(pointer_type->getStorageFile(), search_pointer->second.value, 0u, value, pointer_type->getPointedType(), access, alignment);
       }
       break;
    case spv::Op::OpPtrAccessChain: // FALLTHROUGH
@@ -2568,7 +2579,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             mkMov(dst, src, typeOfSize(std::max(4u, typeSizeof(type->second->getEnumType()))));
             spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, { dst }, type->second->getPaddings() });
          } else {
-            load(SpirvFile::TEMPORARY, baseStruct.storageFile, baseId, PValue(), offset, baseType);
+            load(SpirvFile::TEMPORARY, baseStruct.storageFile, baseId, { PValue() }, offset, baseType);
          }
       }
       break;
