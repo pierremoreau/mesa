@@ -1736,6 +1736,8 @@ CodeEmitterGM107::emitNOT()
 void
 CodeEmitterGM107::emitIADD()
 {
+   const bool applySrc1Neg = insn->src(1).mod.neg() ^ (insn->op == OP_SUB);
+
    if (insn->src(1).getFile() != FILE_IMMEDIATE) {
       switch (insn->src(1).getFile()) {
       case FILE_GPR:
@@ -1756,7 +1758,8 @@ CodeEmitterGM107::emitIADD()
       }
       emitSAT(0x32);
       emitNEG(0x31, insn->src(0));
-      emitNEG(0x30, insn->src(1));
+      if (applySrc1Neg)
+         code[1] |= 0x00010000;
       emitCC (0x2f);
       emitX  (0x2b);
    } else {
@@ -1765,11 +1768,8 @@ CodeEmitterGM107::emitIADD()
       emitSAT (0x36);
       emitX   (0x35);
       emitCC  (0x34);
-      emitIMMD(0x14, 32, insn->src(1));
+      emitIMMD(0x14, 32, insn->src(1), applySrc1Neg);
    }
-
-   if (insn->op == OP_SUB)
-      code[1] ^= 0x00010000;
 
    emitGPR(0x08, insn->src(0));
    emitGPR(0x00, insn->def(0));
