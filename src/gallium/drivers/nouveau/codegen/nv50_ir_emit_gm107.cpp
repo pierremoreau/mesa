@@ -87,7 +87,7 @@ private:
    inline void emitADDR(int, int, int, int, const ValueRef &);
    inline void emitCBUF(int, int, int, int, int, const ValueRef &);
    inline bool longIMMD(const ValueRef &);
-   inline void emitIMMD(int, int, const ValueRef &);
+   inline void emitIMMD(int, int, const ValueRef &, bool = false);
 
    void emitCond3(int, CondCode);
    void emitCond4(int, CondCode);
@@ -334,10 +334,15 @@ CodeEmitterGM107::longIMMD(const ValueRef &ref)
 }
 
 void
-CodeEmitterGM107::emitIMMD(int pos, int len, const ValueRef &ref)
+CodeEmitterGM107::emitIMMD(int pos, int len, const ValueRef &ref, bool applyNeg)
 {
    const ImmediateValue *imm = ref.get()->asImm();
    uint32_t val = imm->reg.data.u32;
+   if (applyNeg) {
+      Storage storage = imm->reg;
+      storage.data.s32 = -storage.data.s32;
+      val = storage.data.u32;
+   }
 
    if (len == 19) {
       if (insn->sType == TYPE_F32 || insn->sType == TYPE_F16) {
