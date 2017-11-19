@@ -3477,6 +3477,58 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, { res }, type->second->getPaddings() });
       }
       break;
+   case spv::Op::OpControlBarrier:
+      {
+         auto const scopeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto const memoryId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto const memorySemanticsId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+
+         auto searchScope = spvValues.find(scopeId);
+         if (searchScope == spvValues.end()) {
+            _debug_printf("Could not find scope %u\n", scopeId);
+            return SPV_ERROR_INVALID_LOOKUP;
+         }
+         ImmediateValue *scope = searchScope->second.value.front().value->asImm();
+         if (!scope) {
+            _debug_printf("Scope %u is not an immediate value\n", scopeId);
+            return SPV_ERROR_INVALID_ID;
+         }
+         auto searchMemory = spvValues.find(memoryId);
+         if (searchMemory == spvValues.end()) {
+            _debug_printf("Could not find memory %u\n", memoryId);
+            return SPV_ERROR_INVALID_LOOKUP;
+         }
+         ImmediateValue *memory = searchMemory->second.value.front().value->asImm();
+         if (!memory) {
+            _debug_printf("Memory %u is not an immediate value\n", memoryId);
+            return SPV_ERROR_INVALID_ID;
+         }
+         auto searchMemorySemantics = spvValues.find(memorySemanticsId);
+         if (searchMemorySemantics == spvValues.end()) {
+            _debug_printf("Could not find memorySemantics %u\n", memorySemanticsId);
+            return SPV_ERROR_INVALID_LOOKUP;
+         }
+         ImmediateValue *memorySemantics = searchMemorySemantics->second.value.front().value->asImm();
+         if (!memorySemantics) {
+            _debug_printf("MemorySemantics %u is not an immediate value\n", memorySemanticsId);
+            return SPV_ERROR_INVALID_ID;
+         }
+
+         if (static_cast<spv::Scope>(scope->reg.data.u32) != spv::Scope::Workgroup ||
+             static_cast<spv::Scope>(memory->reg.data.u32) != spv::Scope::Workgroup) {
+            _debug_printf("Only workgroup scopes are currently supported.\n");
+            return SPV_ERROR_INVALID_BINARY;
+         }
+         if ((memorySemantics->reg.data.u32 & static_cast<uint32_t>(spv::MemorySemanticsMask::WorkgroupMemory)) != memorySemantics->reg.data.u32) {
+            _debug_printf("Only the workgroup memory semantics is currently supported.\n");
+            return SPV_ERROR_INVALID_BINARY;
+         }
+
+         Instruction *insn = mkOp2(OP_BAR, TYPE_U32, nullptr, mkImm(0), mkImm(0));
+         insn->fixed = 1u;
+         insn->subOp = NV50_IR_SUBOP_BAR_SYNC;
+      }
+      break;
    case spv::Op::OpSampledImage:
       {
          auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
