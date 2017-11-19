@@ -263,16 +263,15 @@ public:
       virtual ~TypePointer() {}
       virtual bool isBasicType() const override { return true; }
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
-      virtual unsigned int getSize(void) const override { return size / 8u; }
+      virtual unsigned int getSize(void) const override { return sizeInBytes; }
       virtual enum DataType getEnumType(int isSigned = -1) const override;
       enum SpirvFile getStorageFile() const { return Converter::getStorageFile(storage); }
       Type* getPointedType() const { return type; }
       virtual void getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position = 0u) const override;
 
       spv::StorageClass storage;
-      spv::Id type_id;
       Type* type;
-      unsigned int size;
+      unsigned int sizeInBytes;
    };
    class TypeFunction : public Type {
    public:
@@ -987,28 +986,28 @@ Converter::TypePointer::TypePointer(const spv_parsed_instruction_t *const parsed
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    storage = spirv::getOperand<spv::StorageClass>(parsedInstruction, 1u);
-   type_id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+   auto const type_id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
    auto search = types.find(type_id);
    assert(search != types.end());
 
    type = search->second;
-   size = (chipset < 0xc0) ? 32u : 64u;
-   alignment = size / 8u;
+   sizeInBytes = (chipset >= 0xc0) ? 8u : 4u;
+   alignment = sizeInBytes;
 }
 
 std::vector<Value *>
 Converter::TypePointer::generateNullConstant(Converter &conv) const
 {
-   return { (size == 32u) ? conv.mkImm(0u) : conv.mkImm(0ul) };
+   return { (sizeInBytes == 8u) ? conv.mkImm(0ul) : conv.mkImm(0u) };
 }
 
 enum DataType
 Converter::TypePointer::getEnumType(int /*isSigned*/) const
 {
-   if (size == 32u)
-      return DataType::TYPE_U32;
-   else if (size == 64u)
+   if (sizeInBytes == 8u)
       return DataType::TYPE_U64;
+   else
+      return DataType::TYPE_U32;
 }
 
 void
