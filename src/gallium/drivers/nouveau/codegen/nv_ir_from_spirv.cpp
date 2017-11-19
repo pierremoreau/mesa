@@ -1571,6 +1571,12 @@ Converter::convertOp(spv::Op op)
    case spv::Op::OpUMod:
    case spv::Op::OpFMod:
       return OP_MOD;
+   case spv::Op::OpBitwiseOr:
+      return OP_OR;
+   case spv::Op::OpBitwiseXor:
+      return OP_XOR;
+   case spv::Op::OpBitwiseAnd:
+      return OP_AND;
    default:
       return OP_NOP;
    }
@@ -3233,6 +3239,82 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          values.push_back(tmp);
 
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, values, type->second->getPaddings() });
+      }
+      break;
+   case spv::Op::OpBitwiseOr:
+   case spv::Op::OpBitwiseXor:
+   case spv::Op::OpBitwiseAnd:
+      {
+         auto typeId = parsedInstruction->type_id;
+         auto resId = parsedInstruction->result_id;
+         auto op1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto op2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
+
+         auto type = types.find(typeId);
+         if (type == types.end()) {
+            _debug_printf("Couldn't find type with id %u\n", typeId);
+            return SPV_ERROR_INVALID_LOOKUP;
+         }
+
+         auto op1TypeSearch = spvValues.find(op1Id);
+         if (op1TypeSearch == spvValues.end()) {
+            _debug_printf("Couldn't fint type for id %u\n", op1Id);
+            return SPV_ERROR_INVALID_LOOKUP;
+         }
+         auto op1Type = op1TypeSearch->second.type;
+         auto op2TypeSearch = spvValues.find(op2Id);
+         if (op2TypeSearch == spvValues.end()) {
+            _debug_printf("Couldn't fint type for id %u\n", op2Id);
+            return SPV_ERROR_INVALID_LOOKUP;
+         }
+         auto op2Type = op2TypeSearch->second.type;
+
+         if (op1Type->getElementsNb() != op2Type->getElementsNb()) {
+            _debug_printf("op1 with id %u, and op2 with id %u, should have the same number of elements\n", op1Id, op2Id);
+            return SPV_ERROR_INVALID_BINARY;
+         }
+         if (op1Type->getElementsNb() != type->second->getElementsNb()) {
+            _debug_printf("op1 with id %u, and result type with id %u, should have the same number of elements\n", op1Id, typeId);
+            return SPV_ERROR_INVALID_BINARY;
+         }
+
+         auto op = convertOp(opcode);
+
+         auto value = std::vector<PValue>();
+         if (type->second->getElementsNb() == 1u) {
+            auto op1 = getOp(op1Id, 0u);
+            if (op1.isUndefined()) {
+               _debug_printf("Couldn't find op1 with id %u\n", op1Id);
+               return SPV_ERROR_INVALID_LOOKUP;
+            }
+            auto op2 = getOp(op2Id, 0u);
+            if (op2.isUndefined()) {
+               _debug_printf("Couldn't find op2 with id %u\n", op2Id);
+               return SPV_ERROR_INVALID_LOOKUP;
+            }
+
+            auto *tmp = mkOp2v(op, type->second->getEnumType(false), getScratch(op1.value->reg.size), op1.value, op2.value);
+            value.push_back(tmp);
+         } else {
+            for (unsigned int i = 0u; i < type->second->getElementsNb(); ++i) {
+               auto op1 = getOp(op1Id, i);
+               if (op1.isUndefined()) {
+                  _debug_printf("Couldn't find component %u for op1 with id %u\n", i, op1Id);
+                  return SPV_ERROR_INVALID_LOOKUP;
+               }
+               auto op2 = getOp(op2Id, i);
+               if (op2.isUndefined()) {
+                  _debug_printf("Couldn't find component %u for op2 with id %u\n", i, op2Id);
+                  return SPV_ERROR_INVALID_LOOKUP;
+               }
+
+               auto *tmp = mkOp2v(op, type->second->getElementEnumType(i, false), getScratch(op1.value->reg.size), op1.value, op2.value);
+               value.push_back(tmp);
+            }
+         }
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, value, type->second->getPaddings() });
+
       }
       break;
    case spv::Op::OpVectorTimesScalar:
