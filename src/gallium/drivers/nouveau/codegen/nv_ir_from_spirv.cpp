@@ -145,14 +145,14 @@ public:
    using ValueMap = std::unordered_map<spv::Id, SpirVValue>;
    class TypeVoid : public Type {
    public:
-      TypeVoid(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
+      TypeVoid(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeVoid() {}
       virtual bool isVoidType() const override { return true; }
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
    };
    class TypeBool : public Type {
    public:
-      TypeBool(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
+      TypeBool(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeBool() {}
       virtual bool isBasicType() const override { return true; }
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
@@ -161,7 +161,7 @@ public:
    };
    class TypeInt : public Type {
    public:
-      TypeInt(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
+      TypeInt(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeInt() {}
       virtual bool isBasicType() const override { return true; }
       virtual std::vector<ImmediateValue *> generateConstant(Converter &conv,
@@ -176,7 +176,7 @@ public:
    };
    class TypeFloat : public Type {
    public:
-      TypeFloat(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
+      TypeFloat(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeFloat() {}
       virtual bool isBasicType() const override { return true; }
       virtual std::vector<ImmediateValue *> generateConstant(Converter &conv,
@@ -189,7 +189,7 @@ public:
    };
    class TypeStruct : public Type {
    public:
-      TypeStruct(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed, std::unordered_map<spv::Id, Type*> const& types,
+      TypeStruct(const spv_parsed_instruction_t *const parsedInstruction, std::unordered_map<spv::Id, Type*> const& types,
                  Decorations const& decorations);
       virtual ~TypeStruct() {}
       virtual bool isCompooundType() const override { return true; }
@@ -213,7 +213,7 @@ public:
    };
    class TypeVector : public Type {
    public:
-      TypeVector(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed, std::unordered_map<spv::Id, Type*> const& types);
+      TypeVector(const spv_parsed_instruction_t *const parsedInstruction, std::unordered_map<spv::Id, Type*> const& types);
       virtual ~TypeVector() {}
       virtual bool isCompooundType() const override { return true; }
       virtual std::vector<ImmediateValue *> generateConstant(Converter &conv,
@@ -236,7 +236,7 @@ public:
    };
    class TypeArray : public Type {
    public:
-      TypeArray(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed, std::unordered_map<spv::Id, Type*> const& types,
+      TypeArray(const spv_parsed_instruction_t *const parsedInstruction, std::unordered_map<spv::Id, Type*> const& types,
                  const ValueMap &m);
       virtual ~TypeArray() {}
       virtual bool isCompooundType() const override { return true; }
@@ -258,7 +258,7 @@ public:
    };
    class TypePointer : public Type {
    public:
-      TypePointer(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed, unsigned int psize,
+      TypePointer(const spv_parsed_instruction_t *const parsedInstruction, uint16_t chipset,
                   std::unordered_map<spv::Id, Type*> const& types);
       virtual ~TypePointer() {}
       virtual bool isBasicType() const override { return true; }
@@ -276,7 +276,7 @@ public:
    };
    class TypeFunction : public Type {
    public:
-      TypeFunction(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
+      TypeFunction(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeFunction() {}
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
 
@@ -285,7 +285,7 @@ public:
    };
    class TypeSampler : public Type {
    public:
-      TypeSampler(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
+      TypeSampler(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeSampler() {}
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
 
@@ -293,7 +293,7 @@ public:
    };
    class TypeImage : public Type {
    public:
-      TypeImage(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
+      TypeImage(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeImage() {}
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
 
@@ -309,7 +309,7 @@ public:
    };
    class TypeSampledImage : public Type {
    public:
-      TypeSampledImage(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed);
+      TypeSampledImage(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeSampledImage() {}
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
       spv::Id getImageType() const { return image_type; }
@@ -503,17 +503,15 @@ ImmediateValue* generateImmediate(Converter &conv, const spv_parsed_instruction_
    return conv.mkImm(value);
 }
 
-Converter::TypeVoid::TypeVoid(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeVoid)
+Converter::TypeVoid::TypeVoid(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeVoid)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-   didSucceed = true;
 }
 
-Converter::TypeBool::TypeBool(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeBool)
+Converter::TypeBool::TypeBool(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeBool)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    alignment = 1u;
-   didSucceed = true;
 }
 
 std::vector<Value *>
@@ -528,13 +526,12 @@ Converter::TypeBool::getEnumType(int /*isSigned*/) const
    return DataType::TYPE_NONE;
 }
 
-Converter::TypeInt::TypeInt(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeInt)
+Converter::TypeInt::TypeInt(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeInt)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    width = spirv::getOperand<unsigned>(parsedInstruction, 1u);
    signedness = spirv::getOperand<unsigned>(parsedInstruction, 2u);
    alignment = width / 8u;
-   didSucceed = true;
 }
 
 std::vector<ImmediateValue *>
@@ -611,12 +608,11 @@ Converter::TypeInt::getEnumType(int isSigned) const
    }
 }
 
-Converter::TypeFloat::TypeFloat(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeFloat)
+Converter::TypeFloat::TypeFloat(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeFloat)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    width = spirv::getOperand<unsigned>(parsedInstruction, 1u);
    alignment = width / 8u;
-   didSucceed = true;
 }
 
 std::vector<ImmediateValue *>
@@ -664,7 +660,7 @@ Converter::TypeFloat::getEnumType(int /*isSigned*/) const
    }
 }
 
-Converter::TypeStruct::TypeStruct(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed,
+Converter::TypeStruct::TypeStruct(const spv_parsed_instruction_t *const parsedInstruction,
                                   std::unordered_map<spv::Id, Type*> const& types,
                                   std::unordered_map<spv::Id, Decoration> const& decorations) : Type(spv::Op::OpTypeStruct)
 {
@@ -682,11 +678,8 @@ Converter::TypeStruct::TypeStruct(const spv_parsed_instruction_t *const parsedIn
    for (unsigned int i = 1u; i < parsedInstruction->num_operands; ++i) {
       const auto member_id = spirv::getOperand<spv::Id>(parsedInstruction, i);
       auto search = types.find(member_id);
-      if (search == types.end()) {
-         _debug_printf("Couldn't find the type %u associated to TypeStruct %u\n", member_id, id);
-         didSucceed = false;
-         return;
-      }
+      assert(search != types.end());
+
       member_ids.push_back(member_id);
       member_types.push_back(search->second);
 
@@ -706,8 +699,6 @@ Converter::TypeStruct::TypeStruct(const spv_parsed_instruction_t *const parsedIn
    }
    size += (-size) & (largest_alignment - 1u);
    alignment = largest_alignment;
-
-   didSucceed = true;
 }
 
 std::vector<ImmediateValue *>
@@ -791,21 +782,17 @@ Converter::TypeStruct::getGlobalOffset(BuildUtil *bu, Decoration const& decorati
    }
 }
 
-Converter::TypeVector::TypeVector(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed,
+Converter::TypeVector::TypeVector(const spv_parsed_instruction_t *const parsedInstruction,
                                   std::unordered_map<spv::Id, Type*> const& types) : Type(spv::Op::OpTypeVector)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    component_type_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
    auto search = types.find(component_type_id);
-   if (search == types.end()) {
-      _debug_printf("Couldn't find the type associated to TypeVector %u\n", id);
-      didSucceed = false;
-      return;
-   }
+   assert(search != types.end());
+
    component_type = search->second;
    elements_nb = spirv::getOperand<unsigned>(parsedInstruction, 2u);
    alignment = (elements_nb != 3u) ? elements_nb * component_type->getSize() : 4u * component_type->getSize();
-   didSucceed = true;
 }
 
 // TODO(pmoreau): check this one, this does not seem correct.
@@ -899,25 +886,21 @@ Converter::TypeVector::getPaddings() const
    return paddings;
 }
 
-Converter::TypeArray::TypeArray(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed,
+Converter::TypeArray::TypeArray(const spv_parsed_instruction_t *const parsedInstruction,
                                 std::unordered_map<spv::Id, Type*> const& types,
                                 const ValueMap &m) : Type(spv::Op::OpTypeArray)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    component_type_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
    auto search = types.find(component_type_id);
-   if (search == types.end()) {
-      _debug_printf("Couldn't find the type associated to TypeArray %u\n", id);
-      didSucceed = false;
-      return;
-   }
+   assert(search != types.end());
+
    component_type = search->second;
    elements_nb_id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
    auto searchElemNb = m.find(elements_nb_id);
    assert(searchElemNb != m.end() && searchElemNb->second.storageFile == SpirvFile::IMMEDIATE);
    elements_nb = searchElemNb->second.value.front().value->asImm()->reg.data.u32;
    alignment = component_type->getAlignment();
-   didSucceed = true;
 }
 
 std::vector<Value *>
@@ -998,22 +981,18 @@ Converter::TypeArray::getPaddings() const
    return paddings;
 }
 
-Converter::TypePointer::TypePointer(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed,
-                                    unsigned int psize,
+Converter::TypePointer::TypePointer(const spv_parsed_instruction_t *const parsedInstruction,
+                                    uint16_t chipset,
                                     std::unordered_map<spv::Id, Type*> const& types) : Type(spv::Op::OpTypePointer)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    storage = spirv::getOperand<spv::StorageClass>(parsedInstruction, 1u);
    type_id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
    auto search = types.find(type_id);
-   if (search == types.end()) {
-      _debug_printf("Couldn't find the type associated to TypePointer %u\n", id);
-      didSucceed = false;
-      return;
-   }
+   assert(search != types.end());
+
    type = search->second;
-   didSucceed = true;
-   size = psize;
+   size = (chipset < 0xc0) ? 32u : 64u;
    alignment = size / 8u;
 }
 
@@ -1030,11 +1009,6 @@ Converter::TypePointer::getEnumType(int /*isSigned*/) const
       return DataType::TYPE_U32;
    else if (size == 64u)
       return DataType::TYPE_U64;
-   else {
-      _debug_printf("TypePointer has a non valid size of %u bits\n", size);
-      assert(false);
-      return DataType::TYPE_NONE;
-   }
 }
 
 void
@@ -1063,32 +1037,29 @@ Converter::TypePointer::getGlobalOffset(BuildUtil *bu, Decoration const& decorat
       type->getGlobalOffset(bu, decoration, offset, ids, position + 1u);
 }
 
-Converter::TypeFunction::TypeFunction(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeFunction)
+Converter::TypeFunction::TypeFunction(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeFunction)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    type = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
    for (unsigned int i = 2u; i < parsedInstruction->num_operands; ++i)
       params.push_back(spirv::getOperand<spv::Id>(parsedInstruction, i));
    alignment = 0u;
-   didSucceed = true;
 }
 
-Converter::TypeSampler::TypeSampler(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeSampler)
+Converter::TypeSampler::TypeSampler(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeSampler)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    alignment = 0u;
-   didSucceed = true;
 }
 
-Converter::TypeSampledImage::TypeSampledImage(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeSampledImage)
+Converter::TypeSampledImage::TypeSampledImage(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeSampledImage)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    image_type = spirv::getOperand<spv::Id>(parsedInstruction, 1);
    alignment = 0u;
-   didSucceed = true;
 }
 
-Converter::TypeImage::TypeImage(const spv_parsed_instruction_t *const parsedInstruction, bool &didSucceed) : Type(spv::Op::OpTypeImage)
+Converter::TypeImage::TypeImage(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeImage)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    sampled_type = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
@@ -1101,7 +1072,6 @@ Converter::TypeImage::TypeImage(const spv_parsed_instruction_t *const parsedInst
    if (parsedInstruction->num_operands == 9u)
       access = spirv::getOperand<spv::AccessQualifier>(parsedInstruction, 8u);
    alignment = 0u;
-   didSucceed = true;
 }
 
 Value *
@@ -1479,12 +1449,7 @@ Converter::run()
 template<typename T> spv_result_t
 Converter::convertType(const spv_parsed_instruction_t *parsedInstruction)
 {
-   bool didSucceed = false;
-   T *type = new T(parsedInstruction, didSucceed);
-   if (!didSucceed) {
-      delete type;
-      return SPV_ERROR_INTERNAL;
-   }
+   T *type = new T(parsedInstruction);
    types.emplace(type->id, type);
 
    return SPV_SUCCESS;
@@ -1493,12 +1458,7 @@ Converter::convertType(const spv_parsed_instruction_t *parsedInstruction)
 template<> spv_result_t
 Converter::convertType<Converter::TypeStruct>(const spv_parsed_instruction_t *parsedInstruction)
 {
-   bool didSucceed = false;
-   auto *type = new TypeStruct(parsedInstruction, didSucceed, types, decorations);
-   if (!didSucceed) {
-      delete type;
-      return SPV_ERROR_INTERNAL;
-   }
+   auto *type = new TypeStruct(parsedInstruction, types, decorations);
    types.emplace(type->id, type);
 
    return SPV_SUCCESS;
@@ -1507,12 +1467,7 @@ Converter::convertType<Converter::TypeStruct>(const spv_parsed_instruction_t *pa
 template<> spv_result_t
 Converter::convertType<Converter::TypeVector>(const spv_parsed_instruction_t *parsedInstruction)
 {
-   bool didSucceed = false;
-   auto *type = new TypeVector(parsedInstruction, didSucceed, types);
-   if (!didSucceed) {
-      delete type;
-      return SPV_ERROR_INTERNAL;
-   }
+   auto *type = new TypeVector(parsedInstruction, types);
    types.emplace(type->id, type);
 
    return SPV_SUCCESS;
@@ -1521,12 +1476,7 @@ Converter::convertType<Converter::TypeVector>(const spv_parsed_instruction_t *pa
 template<> spv_result_t
 Converter::convertType<Converter::TypeArray>(const spv_parsed_instruction_t *parsedInstruction)
 {
-   bool didSucceed = false;
-   auto *type = new TypeArray(parsedInstruction, didSucceed, types, spvValues);
-   if (!didSucceed) {
-      delete type;
-      return SPV_ERROR_INTERNAL;
-   }
+   auto *type = new TypeArray(parsedInstruction, types, spvValues);
    types.emplace(type->id, type);
 
    return SPV_SUCCESS;
@@ -1535,13 +1485,8 @@ Converter::convertType<Converter::TypeArray>(const spv_parsed_instruction_t *par
 template<> spv_result_t
 Converter::convertType<Converter::TypePointer>(const spv_parsed_instruction_t *parsedInstruction)
 {
-   bool didSucceed = false;
-   auto *type = new TypePointer(parsedInstruction, didSucceed,
-         (info->target < 0xc0) ? 32u : 64u, types);
-   if (!didSucceed) {
-      delete type;
-      return SPV_ERROR_INTERNAL;
-   }
+   auto *type = new TypePointer(parsedInstruction,
+         info->target, types);
    types.emplace(type->id, type);
 
    return SPV_SUCCESS;
