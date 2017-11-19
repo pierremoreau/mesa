@@ -3661,6 +3661,18 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
          return ntidReg;
       }
    };
+   auto getCtaid = [&](unsigned int index){
+      auto ctaidSysval = mkSysVal(SV_CTAID, index);
+      auto ctaidReg = getScratch(ctaidSysval->reg.size);
+      mkOp1(OP_RDSV, ctaidSysval->reg.type, ctaidReg, ctaidSysval);
+      if (ctaidSysval->reg.type != typeEnum) {
+         auto res = getScratch(typeSize);
+         mkCvt(OP_CVT, typeEnum, res, ctaidSysval->reg.type, ctaidReg);
+         return res;
+      } else {
+         return ctaidReg;
+      }
+   };
    auto getGid = [&](unsigned int index){
       auto tidSysval = mkSysVal(SV_TID, index);
       auto ntidSysval = mkSysVal(SV_NTID, index);
@@ -3711,6 +3723,9 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
    case spv::BuiltIn::WorkgroupSize:
       vec3Func = getNtid;
       break;
+   case spv::BuiltIn::WorkgroupId:
+      vec3Func = getCtaid;
+      break;
    case spv::BuiltIn::GlobalInvocationId:
       vec3Func = getGid;
       break;
@@ -3723,6 +3738,7 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
    switch (builtin) {
    case spv::BuiltIn::LocalInvocationId:
    case spv::BuiltIn::WorkgroupSize:
+   case spv::BuiltIn::WorkgroupId:
    case spv::BuiltIn::GlobalInvocationId:
    case spv::BuiltIn::GlobalSize:
       {
