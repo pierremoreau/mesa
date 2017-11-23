@@ -752,6 +752,7 @@ Converter::TypeStruct::getElementEnumType(unsigned int index, int isSigned) cons
    return member_types[index]->getEnumType(isSigned);
 }
 
+// TODO(pmoreau): This seems wrong
 unsigned int
 Converter::TypeStruct::getGlobalIdx(std::vector<unsigned int> const& elementIds, unsigned position) const
 {
@@ -759,6 +760,7 @@ Converter::TypeStruct::getGlobalIdx(std::vector<unsigned int> const& elementIds,
    return elementIds[position];
 }
 
+// TODO(pmoreau): This seems wrong
 void
 Converter::TypeStruct::getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position) const
 {
@@ -1010,6 +1012,7 @@ Converter::TypePointer::getEnumType(int /*isSigned*/) const
       return DataType::TYPE_U32;
 }
 
+// TODO(pmoreau): Check this function again, it does not seem to be correct.
 void
 Converter::TypePointer::getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position) const
 {
@@ -2394,6 +2397,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          store(pointer_type->getStorageFile(), search_pointer->second.value, 0u, value, pointer_type->getPointedType(), access, alignment);
       }
       break;
+   // TODO(pmoreau): Should have another look at it.
+   // * AccessChain -> struct, array, vector, etc.
+   // * PtrAccessChain -> dereference a pointer array, i.e. float* = {3,4,5}
    case spv::Op::OpPtrAccessChain: // FALLTHROUGH
    case spv::Op::OpInBoundsPtrAccessChain:
       {
