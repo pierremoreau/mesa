@@ -229,7 +229,6 @@ public:
       virtual std::vector<unsigned int> getPaddings() const override;
       virtual bool isVectorOfSize(unsigned int size) const override { return size == elements_nb; }
 
-      spv::Id component_type_id;
       Type* component_type;
       word elements_nb;
    };
@@ -250,9 +249,7 @@ public:
       virtual void getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position = 0u) const override;
       virtual std::vector<unsigned int> getPaddings() const override;
 
-      spv::Id component_type_id;
       Type* component_type;
-      spv::Id elements_nb_id;
       unsigned elements_nb;
    };
    class TypePointer : public Type {
@@ -784,7 +781,7 @@ Converter::TypeVector::TypeVector(const spv_parsed_instruction_t *const parsedIn
                                   std::unordered_map<spv::Id, Type*> const& types) : Type(spv::Op::OpTypeVector)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-   component_type_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+   spv::Id const component_type_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
    auto search = types.find(component_type_id);
    assert(search != types.end());
 
@@ -889,12 +886,12 @@ Converter::TypeArray::TypeArray(const spv_parsed_instruction_t *const parsedInst
                                 const ValueMap &m) : Type(spv::Op::OpTypeArray)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-   component_type_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+   spv::Id const component_type_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
    auto search = types.find(component_type_id);
    assert(search != types.end());
 
    component_type = search->second;
-   elements_nb_id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+   spv::Id const elements_nb_id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
    auto searchElemNb = m.find(elements_nb_id);
    assert(searchElemNb != m.end() && searchElemNb->second.storageFile == SpirvFile::IMMEDIATE);
    elements_nb = searchElemNb->second.value.front().value->asImm()->reg.data.u32;
