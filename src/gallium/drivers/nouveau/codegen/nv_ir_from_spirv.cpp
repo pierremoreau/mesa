@@ -198,7 +198,7 @@ public:
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
       virtual unsigned int getSize(void) const override { return size; }
       virtual enum DataType getEnumType(int isSigned = -1) const override;
-      virtual unsigned int getElementsNb(void) const override { return static_cast<unsigned>(member_ids.size()); }
+      virtual unsigned int getElementsNb(void) const override { return static_cast<unsigned>(members.size()); }
       virtual unsigned int getElementSize(unsigned int index) const override;
       virtual Type const* getElementType(unsigned int index) const override;
       virtual enum DataType getElementEnumType(unsigned int index, int isSigned = -1) const override;
@@ -206,8 +206,7 @@ public:
       virtual void getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position = 0u) const override;
       virtual std::vector<unsigned int> getPaddings() const override { return member_paddings; }
 
-      std::vector<spv::Id> member_ids;
-      std::vector<Type*> member_types;
+      std::vector<Type*> members;
       std::vector<unsigned int> member_paddings;
       unsigned size;
    };
@@ -665,8 +664,7 @@ Converter::TypeStruct::TypeStruct(const spv_parsed_instruction_t *const parsedIn
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    size = 0u;
-   member_ids.reserve(parsedInstruction->num_operands - 1u);
-   member_types.reserve(parsedInstruction->num_operands - 1u);
+   members.reserve(parsedInstruction->num_operands - 1u);
    auto largest_alignment = 0u;
 
    bool is_packed = false;
@@ -679,8 +677,7 @@ Converter::TypeStruct::TypeStruct(const spv_parsed_instruction_t *const parsedIn
       auto search = types.find(member_id);
       assert(search != types.end());
 
-      member_ids.push_back(member_id);
-      member_types.push_back(search->second);
+      members.push_back(search->second);
 
       const auto member_size = search->second->getSize();
       const auto member_alignment = is_packed ? 1u : search->second->getAlignment();
@@ -704,9 +701,9 @@ std::vector<ImmediateValue *>
 Converter::TypeStruct::generateConstant(Converter &conv, const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const
 {
    std::vector<ImmediateValue *> imms;
-   for (const Type *member_type : member_types) {
-      const auto member_constant = member_type->generateConstant(conv, parsedInstruction, operandIndex);
-      imms.insert(imms.end(), member_constant.begin(), member_constant.end());
+   for (const Type *member : members) {
+      const auto constants = member->generateConstant(conv, parsedInstruction, operandIndex);
+      imms.insert(imms.end(), constants.begin(), constants.end());
    }
    return imms;
 }
@@ -715,9 +712,9 @@ std::vector<Value *>
 Converter::TypeStruct::generateNullConstant(Converter &conv) const
 {
    std::vector<Value *> null_constant;
-   for (const Type *member_type : member_types) {
-      const auto member_constant = member_type->generateNullConstant(conv);
-      null_constant.insert(null_constant.end(), member_constant.begin(), member_constant.end());
+   for (const Type *member : members) {
+      const auto constants = member->generateNullConstant(conv);
+      null_constant.insert(null_constant.end(), constants.begin(), constants.end());
    }
    return null_constant;
 }
@@ -731,25 +728,25 @@ Converter::TypeStruct::getEnumType(int /*isSigned*/) const
 unsigned int
 Converter::TypeStruct::getElementSize(unsigned int index) const
 {
-   assert(index < member_types.size());
-   assert(member_types[index] != nullptr);
-   return member_types[index]->getSize();
+   assert(index < members.size());
+   assert(members[index] != nullptr);
+   return members[index]->getSize();
 }
 
 Converter::Type const*
 Converter::TypeStruct::getElementType(unsigned int index) const
 {
-   assert(index < member_types.size());
-   assert(member_types[index] != nullptr);
-   return member_types[index];
+   assert(index < members.size());
+   assert(members[index] != nullptr);
+   return members[index];
 }
 
 enum DataType
 Converter::TypeStruct::getElementEnumType(unsigned int index, int isSigned) const
 {
-   assert(index < member_types.size());
-   assert(member_types[index] != nullptr);
-   return member_types[index]->getEnumType(isSigned);
+   assert(index < members.size());
+   assert(members[index] != nullptr);
+   return members[index]->getEnumType(isSigned);
 }
 
 // TODO(pmoreau): This seems wrong
@@ -769,7 +766,7 @@ Converter::TypeStruct::getGlobalOffset(BuildUtil *bu, Decoration const& decorati
    const auto imm = ids[position];
    uint32_t struct_off = 0u;
    for (int i = 0; i < imm->reg.data.u32; ++i)
-      struct_off += member_types[i]->getSize();
+      struct_off += members[i]->getSize();
    auto res = bu->getScratch(offset->reg.size);
    if (offset->reg.type == TYPE_U64)
       bu->loadImm(res, static_cast<unsigned long>(struct_off));
