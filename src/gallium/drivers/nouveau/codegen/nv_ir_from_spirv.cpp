@@ -3785,7 +3785,10 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          auto op2 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 5u), 0u);
          auto op3 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 6u), 0u);
          auto res = getScratch();
-         mkOp3(OP_MADSP, type->getEnumType(op == OpenCLLIB::SMad24), res, op1, op2, op3)->subOp = NV50_IR_SUBOP_MADSP(2, 2, 0); // i24 i24 i32
+         if (op == OpenCLLIB::SMad24)
+            mkOp3(OP_MADSP, type->getEnumType(1), res, op1, op2, op3)->subOp = NV50_IR_SUBOP_MADSP(3, 1, 0); // s24 s24 s32
+         else
+            mkOp3(OP_MADSP, type->getEnumType(0), res, op1, op2, op3)->subOp = NV50_IR_SUBOP_MADSP(2, 2, 0); // u24 u24 u32
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, { res }, type->getPaddings() });
          return SPV_SUCCESS;
       }
