@@ -826,11 +826,9 @@ CodeEmitterNVC0::emitMADSP(const Instruction *i)
    if (i->subOp == NV50_IR_SUBOP_MADSP_SD) {
       code[1] |= 0x01800000;
    } else {
-      code[0] |= (i->subOp & 0x00f) << 7;
-      code[0] |= (i->subOp & 0x0f0) << 1;
-      code[0] |= (i->subOp & 0x100) >> 3;
-      code[0] |= (i->subOp & 0x200) >> 2;
-      code[1] |= (i->subOp & 0xc00) << 13;
+      code[0] |= (i->subOp & 0x007) << 7;
+      code[0] |= (i->subOp & 0x030) << 1;
+      code[1] |= (i->subOp & 0x300) << 15;
    }
 
    if (i->flagsDef >= 0)

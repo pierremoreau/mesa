@@ -238,15 +238,28 @@ enum operation
 #define NV50_IR_SUBOP_SHFL_BFLY 3
 #define NV50_IR_SUBOP_LOAD_LOCKED    1
 #define NV50_IR_SUBOP_STORE_UNLOCKED 2
+
 #define NV50_IR_SUBOP_MADSP_SD     0xffff
-// Yes, we could represent those with DataType.
-// Or put the type into operation and have a couple 1000 values in that enum.
-// This will have to do for now.
-// The bitfields are supposed to correspond to nve4 ISA.
-// For a: 0 -> 32-bit, 2 -> 24-bit, 4 -> 16-bit
-// For b: 2 -> 24-bit, 0,4 -> 16-bit
-// For c: 0,2 -> 32-bit, 4 -> 24-bit, 8 -> 16-bit
-#define NV50_IR_SUBOP_MADSP(a,b,c) (((c) << 8) | ((b) << 4) | (a))
+#define NV50_IR_SUBOP_MADSP_SRC0_U32  0x000
+#define NV50_IR_SUBOP_MADSP_SRC0_S32  0x001
+#define NV50_IR_SUBOP_MADSP_SRC0_U24  0x002
+#define NV50_IR_SUBOP_MADSP_SRC0_S24  0x003
+#define NV50_IR_SUBOP_MADSP_SRC0_U16L 0x004
+#define NV50_IR_SUBOP_MADSP_SRC0_S16L 0x005
+#define NV50_IR_SUBOP_MADSP_SRC0_U16H 0x006
+#define NV50_IR_SUBOP_MADSP_SRC0_S16H 0x007
+#define NV50_IR_SUBOP_MADSP_SRC1_U24  0x000
+#define NV50_IR_SUBOP_MADSP_SRC1_S24  0x010
+#define NV50_IR_SUBOP_MADSP_SRC1_U16L 0x020
+#define NV50_IR_SUBOP_MADSP_SRC1_S16L 0x030
+#define NV50_IR_SUBOP_MADSP_SRC2_32   0x000
+#define NV50_IR_SUBOP_MADSP_SRC2_24   0x100
+#define NV50_IR_SUBOP_MADSP_SRC2_16L  0x200
+#define NV50_IR_SUBOP_MADSP_TUPLE(a, b, c) \
+   ( NV50_IR_SUBOP_MADSP_SRC0_ ## a | \
+     NV50_IR_SUBOP_MADSP_SRC1_ ## b | \
+     NV50_IR_SUBOP_MADSP_SRC2_ ## c )
+
 #define NV50_IR_SUBOP_V1(d,a,b)    (((d) << 10) | ((b) << 5) | (a) | 0x0000)
 #define NV50_IR_SUBOP_V2(d,a,b)    (((d) << 10) | ((b) << 5) | (a) | 0x4000)
 #define NV50_IR_SUBOP_V4(d,a,b)    (((d) << 10) | ((b) << 5) | (a) | 0x8000)

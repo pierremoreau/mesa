@@ -556,11 +556,9 @@ CodeEmitterGK110::emitMADSP(const Instruction *i)
    if (i->subOp == NV50_IR_SUBOP_MADSP_SD) {
       code[1] |= 0x00c00000;
    } else {
-      code[1] |= (i->subOp & 0x00f) << 19; // imadp1
-      code[1] |= (i->subOp & 0x0f0) << 20; // imadp2
-      code[1] |= (i->subOp & 0x100) << 11; // imadp3
-      code[1] |= (i->subOp & 0x200) << 15; // imadp3
-      code[1] |= (i->subOp & 0xc00) << 12; // imadp3
+      code[1] |= (i->subOp & 0x007) << 19; // src0
+      code[1] |= (i->subOp & 0x030) << 20; // src1
+      code[1] |= (i->subOp & 0x300) << 14; // src2
    }
 
    if (i->flagsDef >= 0)

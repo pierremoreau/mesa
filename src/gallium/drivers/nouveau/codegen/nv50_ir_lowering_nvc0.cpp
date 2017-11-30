@@ -1957,17 +1957,17 @@ NVC0LoweringPass::processSurfaceCoordsNVE4(TexInstruction *su)
    if (dim == 3) {
       v = loadSuInfo32(ind, slot, NVC0_SU_INFO_UNK1C, su->tex.bindless);
       bld.mkOp3(OP_MADSP, TYPE_U32, off, src[2], v, src[1])
-         ->subOp = NV50_IR_SUBOP_MADSP(4,2,8); // u16l u16l u16l
+         ->subOp = NV50_IR_SUBOP_MADSP_TUPLE(U16L, U16L, 16L);
 
       v = loadSuInfo32(ind, slot, NVC0_SU_INFO_PITCH, su->tex.bindless);
       bld.mkOp3(OP_MADSP, TYPE_U32, off, off, v, src[0])
-         ->subOp = NV50_IR_SUBOP_MADSP(0,2,8); // u32 u16l u16l
+         ->subOp = NV50_IR_SUBOP_MADSP_TUPLE(U32, U16L, 16L);
    } else {
       assert(dim == 2);
       v = loadSuInfo32(ind, slot, NVC0_SU_INFO_PITCH, su->tex.bindless);
       bld.mkOp3(OP_MADSP, TYPE_U32, off, src[1], v, src[0])
          ->subOp = (su->tex.target.isArray() || su->tex.target.isCube()) ?
-         NV50_IR_SUBOP_MADSP_SD : NV50_IR_SUBOP_MADSP(4,2,8); // u16l u16l u16l
+         NV50_IR_SUBOP_MADSP_SD : NV50_IR_SUBOP_MADSP_TUPLE(U16L, U16L, 16L);
    }
 
    // calculate effective address part 1
@@ -2019,10 +2019,10 @@ NVC0LoweringPass::processSurfaceCoordsNVE4(TexInstruction *su)
       v = loadSuInfo32(ind, slot, NVC0_SU_INFO_ARRAY, su->tex.bindless);
       if (dim == 1)
          bld.mkOp3(OP_MADSP, TYPE_U32, eau, src[1], v, eau)
-            ->subOp = NV50_IR_SUBOP_MADSP(4,0,0); // u16 u24 u32
+            ->subOp = NV50_IR_SUBOP_MADSP_TUPLE(U16L, U24, 32);
       else
          bld.mkOp3(OP_MADSP, TYPE_U32, eau, v, src[2], eau)
-            ->subOp = NV50_IR_SUBOP_MADSP(0,0,0); // u32 u24 u32
+            ->subOp = NV50_IR_SUBOP_MADSP_TUPLE(U32, U24, 32);
       // combine predicates
       assert(p1);
       bld.mkOp2(OP_OR, TYPE_U8, pred, pred, p1);
