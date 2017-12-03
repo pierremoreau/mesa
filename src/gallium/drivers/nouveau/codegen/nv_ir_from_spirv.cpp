@@ -1512,6 +1512,8 @@ Converter::convertOp(spv::Op op)
    case spv::Op::OpUMod:
    case spv::Op::OpFMod:
       return OP_MOD;
+   case spv::Op::OpShiftLeftLogical:
+      return OP_SHL;
    case spv::Op::OpBitwiseOr:
       return OP_OR;
    case spv::Op::OpBitwiseXor:
@@ -3185,6 +3187,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, values, type->second->getPaddings() });
       }
       break;
+   case spv::Op::OpShiftLeftLogical:
    case spv::Op::OpBitwiseOr:
    case spv::Op::OpBitwiseXor:
    case spv::Op::OpBitwiseAnd:
