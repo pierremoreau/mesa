@@ -199,27 +199,48 @@ NVC0LegalizeSSA::handleShift(Instruction *lo)
       // between the right/left cases. The main difference is swapping hi/lo
       // on input and output.
 
-      Value *x32_minus_shift, *pred, *hi1, *hi2;
       DataType type = isSignedIntType(lo->dType) ? TYPE_S32 : TYPE_U32;
       operation antiop = op == OP_SHR ? OP_SHL : OP_SHR;
       if (op == OP_SHR)
          std::swap(src[0], src[1]);
-      bld.mkOp2(OP_ADD, TYPE_U32, (x32_minus_shift = bld.getSSA()), shift, bld.mkImm(0x20))
-         ->src(0).mod = Modifier(NV50_IR_MOD_NEG);
-      bld.mkCmp(OP_SET, CC_LE, TYPE_U8, (pred = bld.getSSA(1, FILE_PREDICATE)),
-                TYPE_U32, shift, bld.mkImm(32));
-      // Compute HI (shift <= 32)
-      bld.mkOp2(OP_OR, TYPE_U32, (hi1 = bld.getSSA()),
-                bld.mkOp2v(op, TYPE_U32, bld.getSSA(), src[1], shift),
-                bld.mkOp2v(antiop, TYPE_U32, bld.getSSA(), src[0], x32_minus_shift))
-         ->setPredicate(CC_P, pred);
-      // Compute LO (all shift values)
-      bld.mkOp2(op, type, (dst[0] = bld.getSSA()), src[0], shift);
-      // Compute HI (shift > 32)
-      bld.mkOp2(op, type, (hi2 = bld.getSSA()), src[0],
-                bld.mkOp1v(OP_NEG, TYPE_S32, bld.getSSA(), x32_minus_shift))
-         ->setPredicate(CC_NOT_P, pred);
-      bld.mkOp2(OP_UNION, TYPE_U32, (dst[1] = bld.getSSA()), hi1, hi2);
+
+      ImmediateValue *shiftImm = shift->asImm();
+      if (shiftImm) {
+         if (shift->reg.data.u32 <= 32) {
+            // Compute LO
+            bld.mkOp2(op, type, (dst[0] = bld.getSSA()), src[0], shiftImm);
+            // Compute HI
+            bld.mkOp2(OP_OR, TYPE_U32, (dst[1] = bld.getSSA()),
+                      bld.mkOp2v(op, TYPE_U32, bld.getSSA(), src[1], shiftImm),
+                      bld.mkOp2v(antiop, TYPE_U32, bld.getSSA(), src[0],
+                                 bld.mkImm(32u - shiftImm->reg.data.u32)));
+         } else {
+            // Compute LO (shift >= 32, therefore filled with 0s)
+            bld.mkOp1(OP_MOV, type, (dst[0] = bld.getSSA()), bld.mkImm(0x0));
+            // Compute HI
+            bld.mkOp2(op, type, (dst[1] = bld.getSSA()), src[0],
+                      bld.mkImm(shiftImm->reg.data.u32 - 32u));
+         }
+      } else {
+         Value *x32_minus_shift, *pred, *hi1, *hi2;
+         bld.mkOp2(OP_ADD, TYPE_U32, (x32_minus_shift = bld.getSSA()), shift, bld.mkImm(0x20))
+            ->src(0).mod = Modifier(NV50_IR_MOD_NEG);
+         bld.mkCmp(OP_SET, CC_LE, TYPE_U8, (pred = bld.getSSA(1, FILE_PREDICATE)),
+                   TYPE_U32, shift, bld.mkImm(32));
+         // Compute HI (shift <= 32)
+         bld.mkOp2(OP_OR, TYPE_U32, (hi1 = bld.getSSA()),
+                   bld.mkOp2v(op, TYPE_U32, bld.getSSA(), src[1], shift),
+                   bld.mkOp2v(antiop, TYPE_U32, bld.getSSA(), src[0], x32_minus_shift))
+            ->setPredicate(CC_P, pred);
+         // Compute LO (all shift values)
+         bld.mkOp2(op, type, (dst[0] = bld.getSSA()), src[0], shift);
+         // Compute HI (shift > 32)
+         bld.mkOp2(op, type, (hi2 = bld.getSSA()), src[0],
+                   bld.mkOp1v(OP_NEG, TYPE_S32, bld.getSSA(), x32_minus_shift))
+            ->setPredicate(CC_NOT_P, pred);
+         bld.mkOp2(OP_UNION, TYPE_U32, (dst[1] = bld.getSSA()), hi1, hi2);
+      }
+
       if (op == OP_SHR)
          std::swap(dst[0], dst[1]);
       bld.mkOp2(OP_MERGE, TYPE_U64, dst64, dst[0], dst[1]);
