@@ -1514,6 +1514,9 @@ Converter::convertOp(spv::Op op)
       return OP_MOD;
    case spv::Op::OpShiftLeftLogical:
       return OP_SHL;
+   case spv::Op::OpShiftRightLogical:
+   case spv::Op::OpShiftRightArithmetic:
+      return OP_SHR;
    case spv::Op::OpBitwiseOr:
       return OP_OR;
    case spv::Op::OpBitwiseXor:
@@ -3188,6 +3191,8 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       }
       break;
    case spv::Op::OpShiftLeftLogical:
+   case spv::Op::OpShiftRightLogical:
+   case spv::Op::OpShiftRightArithmetic:
    case spv::Op::OpBitwiseOr:
    case spv::Op::OpBitwiseXor:
    case spv::Op::OpBitwiseAnd:
@@ -3226,6 +3231,11 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          }
 
          auto op = convertOp(opcode);
+         const Type *elementType = type->second->getElementsNb() == 1u ? type->second : type->second->getElementType(0);
+         int isSigned = 0;
+         if (opcode == spv::Op::OpShiftRightArithmetic && isSignedIntType(elementType->getEnumType()))
+            isSigned = 1;
+         DataType dstTy = elementType->getEnumType(isSigned);
 
          auto value = std::vector<PValue>();
          if (type->second->getElementsNb() == 1u) {
@@ -3240,7 +3250,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
                return SPV_ERROR_INVALID_LOOKUP;
             }
 
-            auto *tmp = mkOp2v(op, type->second->getEnumType(false), getScratch(op1.value->reg.size), op1.value, op2.value);
+            auto *tmp = mkOp2v(op, dstTy, getScratch(op1.value->reg.size), op1.value, op2.value);
             value.push_back(tmp);
          } else {
             for (unsigned int i = 0u; i < type->second->getElementsNb(); ++i) {
@@ -3255,7 +3265,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
                   return SPV_ERROR_INVALID_LOOKUP;
                }
 
-               auto *tmp = mkOp2v(op, type->second->getElementEnumType(i, false), getScratch(op1.value->reg.size), op1.value, op2.value);
+               auto *tmp = mkOp2v(op, dstTy, getScratch(op1.value->reg.size), op1.value, op2.value);
                value.push_back(tmp);
             }
          }
