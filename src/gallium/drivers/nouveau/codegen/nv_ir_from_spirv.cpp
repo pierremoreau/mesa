@@ -75,6 +75,61 @@ const char* getOperand<const char*>(const spv_parsed_instruction_t *parsedInstru
    return reinterpret_cast<const char*>(parsedInstruction->words + parsedOperand.offset);
 }
 
+int isSrcSigned(spv::Op opcode)
+{
+   switch (opcode)
+   {
+   case spv::Op::OpSGreaterThan:
+   case spv::Op::OpSGreaterThanEqual:
+   case spv::Op::OpSLessThan:
+   case spv::Op::OpSLessThanEqual:
+   case spv::Op::OpSDiv:
+   case spv::Op::OpSMod:
+   case spv::Op::OpSRem:
+   case spv::Op::OpAtomicSMin:
+   case spv::Op::OpAtomicSMax:
+   case spv::Op::OpSConvert:
+   case spv::Op::OpConvertFToU:
+   case spv::Op::OpConvertSToF:
+   case spv::Op::OpConvertFToS:
+   case spv::Op::OpSatConvertSToU:
+      return 1;
+   case spv::Op::OpUGreaterThan:
+   case spv::Op::OpUGreaterThanEqual:
+   case spv::Op::OpULessThan:
+   case spv::Op::OpULessThanEqual:
+   case spv::Op::OpUDiv:
+   case spv::Op::OpUMod:
+   case spv::Op::OpAtomicUMin:
+   case spv::Op::OpAtomicUMax:
+   case spv::Op::OpUConvert:
+   case spv::Op::OpConvertUToF:
+   case spv::Op::OpSatConvertUToS:
+      return 0;
+   default:
+      return -1;
+   }
+}
+
+int isDstSigned(spv::Op opcode)
+{
+   switch (opcode)
+   {
+   case spv::Op::OpSConvert:
+   case spv::Op::OpConvertUToF:
+   case spv::Op::OpConvertSToF:
+   case spv::Op::OpConvertFToS:
+   case spv::Op::OpSatConvertUToS:
+      return 1;
+   case spv::Op::OpUConvert:
+   case spv::Op::OpConvertFToU:
+   case spv::Op::OpSatConvertSToU:
+      return 0;
+   default:
+      return -1;
+   }
+}
+
 } // namespace spirv
 
 
@@ -2757,25 +2812,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 
          const Type *op1Type = op1Struct.type;
 
-         int isSrcSigned = -1;
-         switch (opcode) {
-         case spv::Op::OpSGreaterThan:
-         case spv::Op::OpSGreaterThanEqual:
-         case spv::Op::OpSLessThan:
-         case spv::Op::OpSLessThanEqual:
-            isSrcSigned = 1;
-            break;
-         case spv::Op::OpUGreaterThan:
-         case spv::Op::OpUGreaterThanEqual:
-         case spv::Op::OpULessThan:
-         case spv::Op::OpULessThanEqual:
-            isSrcSigned = 0;
-            break;
-         default:
-            break;
-         }
-         const DataType srcTy = (op1Type->getElementsNb() == 1u) ? op1Type->getEnumType(isSrcSigned)
-                                                                 : op1Type->getElementEnumType(0u, isSrcSigned);
+         const int _isSrcSigned = isSrcSigned(opcode);
+         const DataType srcTy = (op1Type->getElementsNb() == 1u) ? op1Type->getEnumType(_isSrcSigned)
+                                                                 : op1Type->getElementEnumType(0u, _isSrcSigned);
 
          std::vector<PValue> values;
          values.reserve(resType->getElementsNb());
@@ -2828,21 +2867,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const SpirVValue &op1Struct = getStructForOperand(2u);
          const SpirVValue &op2Struct = getStructForOperand(3u);
 
-         int isSrcSigned = -1;
-         switch (opcode) {
-         case spv::Op::OpSDiv:
-         case spv::Op::OpSMod:
-            isSrcSigned = 1;
-            break;
-         case spv::Op::OpUDiv:
-         case spv::Op::OpUMod:
-            isSrcSigned = 0;
-            break;
-         default:
-            break;
-         }
-         const DataType dstTy = (resType->getElementsNb() == 1u) ? resType->getEnumType(isSrcSigned)
-                                                                 : resType->getElementEnumType(0u, isSrcSigned);
+         const int _isSrcSigned = isSrcSigned(opcode);
+         const DataType dstTy = (resType->getElementsNb() == 1u) ? resType->getEnumType(_isSrcSigned)
+                                                                 : resType->getElementEnumType(0u, _isSrcSigned);
          const unsigned int elemByteSize = typeSizeof(dstTy);
          const operation op = convertOp(opcode);
 
@@ -2866,9 +2893,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const SpirVValue &op1Struct = getStructForOperand(2u);
          const SpirVValue &op2Struct = getStructForOperand(3u);
 
-         const int isSrcSigned = (opcode == spv::Op::OpSRem) ? 1 : -1;
-         const DataType dstTy = (resType->getElementsNb() == 1u) ? resType->getEnumType(isSrcSigned)
-                                                                 : resType->getElementEnumType(0u, isSrcSigned);
+         const int _isSrcSigned = isSrcSigned(opcode);
+         const DataType dstTy = (resType->getElementsNb() == 1u) ? resType->getEnumType(_isSrcSigned)
+                                                                 : resType->getElementEnumType(0u, _isSrcSigned);
          const unsigned int elemByteSize = typeSizeof(dstTy);
 
          std::vector<PValue> values;
@@ -2910,29 +2937,17 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          Value *pointer = pointerStruct.value.front().value;
          Value *value = has_no_value ? nullptr : getStructForOperand(5u).value.front().value;
 
-         int isSrcSigned = -1;
-         switch (opcode) {
-         case spv::Op::OpAtomicSMin:
-         case spv::Op::OpAtomicSMax:
-            isSrcSigned = 1;
-            break;
-         case spv::Op::OpAtomicUMin:
-         case spv::Op::OpAtomicUMax:
-            isSrcSigned = 0;
-            break;
-         default:
-            break;
-         }
+         const int _isSrcSigned = isSrcSigned(opcode);
 
          if (opcode == spv::Op::OpAtomicIDecrement) {
             value = getScratch(resType->getSize());
-            mkMov(value, mkImm(-1), resType->getEnumType(isSrcSigned));
+            mkMov(value, mkImm(-1), resType->getEnumType(_isSrcSigned));
          }
 
          Value *res = getScratch(resType->getSize());
          Value *base = acquire(SpirvFile::GLOBAL, pointerStruct.type);
-         Instruction *insn = opcode == spv::Op::OpAtomicIIncrement ? mkOp1(OP_ATOM, resType->getEnumType(isSrcSigned), res, base)
-                                                                   : mkOp2(OP_ATOM, resType->getEnumType(isSrcSigned), res, base, value);
+         Instruction *insn = opcode == spv::Op::OpAtomicIIncrement ? mkOp1(OP_ATOM, resType->getEnumType(_isSrcSigned), res, base)
+                                                                   : mkOp2(OP_ATOM, resType->getEnumType(_isSrcSigned), res, base, value);
          insn->subOp = getSubOp(opcode);
          insn->setIndirect(0, 0, pointer);
          if (opcode == spv::Op::OpAtomicISub)
@@ -3050,48 +3065,14 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const spv::Id resId = parsedInstruction->result_id;
          const SpirVValue &src = getStructForOperand(2u);
 
-         int isSrcSigned = -1;
-         int isDstSigned = -1;
-         switch (opcode) {
-         case spv::Op::OpUConvert:
-            isSrcSigned = 0;
-            isDstSigned = 0;
-            break;
-         case spv::Op::OpSConvert:
-            isSrcSigned = 1;
-            isDstSigned = 1;
-            break;
-         case spv::Op::OpConvertUToF:
-            isSrcSigned = 0;
-            isDstSigned = 1;
-            break;
-         case spv::Op::OpConvertFToU:
-            isSrcSigned = 1;
-            isDstSigned = 0;
-            break;
-         case spv::Op::OpConvertSToF:
-         case spv::Op::OpConvertFToS:
-            isSrcSigned = 1;
-            isDstSigned = 1;
-            break;
-         case spv::Op::OpSatConvertUToS:
-            isSrcSigned = 0;
-            isDstSigned = 1;
-            break;
-         case spv::Op::OpSatConvertSToU:
-            isSrcSigned = 1;
-            isDstSigned = 0;
-            break;
-         default:
-            assert(false && "Unsupported opcode");
-            break;
-         }
+         const int _isSrcSigned = isSrcSigned(opcode);
+         const int _isDstSigned = isDstSigned(opcode);
 
          int saturate = opcode == spv::Op::OpSatConvertSToU || opcode == spv::Op::OpSatConvertUToS;
 
          const unsigned int elemByteSize = std::max(4u, resType->getElementSize(0u));
-         const DataType dstTy = resType->getElementEnumType(0u, isDstSigned);
-         const DataType srcTy = src.type->getElementEnumType(0u, isSrcSigned);
+         const DataType dstTy = resType->getElementEnumType(0u, _isDstSigned);
+         const DataType srcTy = src.type->getElementEnumType(0u, _isSrcSigned);
 
          std::vector<PValue> values;
          values.reserve(resType->getElementsNb());
