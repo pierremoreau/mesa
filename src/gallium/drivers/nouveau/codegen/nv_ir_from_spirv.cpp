@@ -141,6 +141,15 @@ public:
       SpirVValue() : storageFile(SpirvFile::NONE), type(nullptr), value(), paddings(), is_packed(false) {}
       SpirVValue(SpirvFile sf, const Type *t, const std::vector<PValue> &v, const std::vector<unsigned int> &p, bool ip = false) : storageFile(sf), type(t), value(v), paddings(p), is_packed(ip) {}
       bool isUndefined() const { return type == nullptr; }
+      Value * getValue(BuildUtil *bld, unsigned int i) const {
+         const PValue &pvalue = value[i];
+         Value *value = pvalue.value;
+         if (storageFile == SpirvFile::IMMEDIATE) {
+            value = bld->getScratch(pvalue.value->reg.size);
+            bld->mkMov(value, pvalue.value, pvalue.value->reg.type);
+         }
+         return value;
+      }
    };
    using ValueMap = std::unordered_map<spv::Id, SpirVValue>;
    class TypeVoid : public Type {
@@ -1574,6 +1583,13 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       auto searchStruct = spvValues.find(id);
       return (searchStruct != spvValues.end()) ? searchStruct->second : SpirVValue{};
    };
+   auto getIdOfOperand = [&](unsigned int operandIndex){
+      const spv_parsed_operand_t parsedOperand = parsedInstruction->operands[operandIndex];
+      return parsedInstruction->words[parsedOperand.offset];
+   };
+   auto getStructForOperand = [&](unsigned int operandIndex){
+      return getStruct(getIdOfOperand(operandIndex));
+   };
    auto getOp = [&](spv::Id id, unsigned c = 0u, bool constants_allowed = true){
       auto searchOp = spvValues.find(id);
       if (searchOp == spvValues.end())
@@ -1637,17 +1653,13 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpExtInst:
       {
-         const auto id = parsedInstruction->result_id;
-         const auto searchType = types.find(parsedInstruction->type_id);
-         if (searchType == types.end()) {
-            _debug_printf("Couldn't find type used by OpExInst\n");
-            return SPV_ERROR_INVALID_ID;
-         }
-         auto const op = spirv::getOperand<OpenCLLIB::Entrypoints>(parsedInstruction, 3u);
+         const spv::Id id = parsedInstruction->result_id;
+         const Type *type = types.find(parsedInstruction->type_id)->second;
+         const word extensionOpcode = spirv::getOperand<word>(parsedInstruction, 3u);
 
          switch (parsedInstruction->ext_inst_type) {
          case SPV_EXT_INST_TYPE_OPENCL_STD:
-            return convertOpenCLInstruction(id, searchType->second, op, parsedInstruction);
+            return convertOpenCLInstruction(id, type, static_cast<OpenCLLIB::Entrypoints>(extensionOpcode), parsedInstruction);
          default:
             assert(false);
             return SPV_UNSUPPORTED;
@@ -1663,15 +1675,15 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    // TODO(pmoreau): Properly handle the different execution modes
    case spv::Op::OpExecutionMode:
       {
-         const auto entryPointId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         const auto executionMode = spirv::getOperand<spv::ExecutionMode>(parsedInstruction, 1u);
+         const spv::Id entryPointId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         const spv::ExecutionMode executionMode = spirv::getOperand<spv::ExecutionMode>(parsedInstruction, 1u);
          _debug_printf("Ignoring unsupported execution mode %u for entry point %u\n", entryPointId, executionMode);
       }
       break;
    case spv::Op::OpSource:
       return SPV_SUCCESS;
    case spv::Op::OpName:
-      names.emplace(spirv::getOperand<spv::Id>(parsedInstruction, 0u), spirv::getOperand<const char*>(parsedInstruction, 1u));
+      names.emplace(getIdOfOperand(0u), spirv::getOperand<const char*>(parsedInstruction, 1u));
       break;
    case spv::Op::OpDecorate:
       return convertDecorate(parsedInstruction);
@@ -1682,18 +1694,12 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpGroupDecorate:
       {
-         auto groupId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto searchGroup = decorations.find(groupId);
-         if (searchGroup == decorations.end()) {
-            _debug_printf("DecorationGroup %u was not defined\n", groupId);
-            return SPV_ERROR_INVALID_ID;
-         }
+         const Decoration &groupDecorations = decorations.find(getIdOfOperand(0u))->second;
 
          for (unsigned int i = 1u; i < parsedInstruction->num_operands; ++i) {
-            auto targetId = spirv::getOperand<spv::Id>(parsedInstruction, i);
-            auto &idDecorations = decorations[targetId];
-            for (const auto &k : searchGroup->second)
-               idDecorations[k.first].insert(idDecorations[k.first].end(), k.second.begin(), k.second.end());
+            Decoration &targetDecorations = decorations[getIdOfOperand(i)];
+            for (const auto &decoration : groupDecorations)
+               targetDecorations[decoration.first].insert(targetDecorations[decoration.first].end(), decoration.second.begin(), decoration.second.end());
          }
       }
       break;
@@ -1723,71 +1729,58 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       return convertType<TypeSampledImage>(parsedInstruction);
    case spv::Op::OpConstant:
       {
-         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto search = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
-         if (search == types.end()) {
-            _debug_printf("Couldn't find type used by OpConstant\n");
-            return SPV_ERROR_INVALID_ID;
-         }
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+
          uint16_t operandIndex = 2u;
-         auto constants = search->second->generateConstant(*this, parsedInstruction, operandIndex);
-         std::vector<PValue> res;
-         for (auto c : constants)
-            res.push_back(c);
-         spvValues.emplace(id, SpirVValue{ SpirvFile::IMMEDIATE, search->second, res, search->second->getPaddings() });
+         const auto constants = resType->generateConstant(*this, parsedInstruction, operandIndex);
+         std::vector<PValue> values;
+         values.reserve(constants.size());
+         for (ImmediateValue *c : constants)
+            values.emplace_back(c);
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::IMMEDIATE, resType, values, resType->getPaddings() });
       }
       break;
    case spv::Op::OpConstantNull:
       {
-         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto search = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
-         if (search == types.end()) {
-            _debug_printf("Couldn't find type used by OpConstant\n");
-            return SPV_ERROR_INVALID_ID;
-         }
-         auto constants = search->second->generateNullConstant(*this);
-         std::vector<PValue> res;
-         for (auto c : constants)
-            res.push_back(c);
-         spvValues.emplace(id, SpirVValue{ SpirvFile::IMMEDIATE, search->second, res, search->second->getPaddings() });
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+
+         const auto constants = resType->generateNullConstant(*this);
+         std::vector<PValue> values;
+         values.reserve(constants.size());
+         for (Value *c : constants)
+            values.emplace_back(c);
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::IMMEDIATE, resType, values, resType->getPaddings() });
       }
    case spv::Op::OpConstantComposite:
       {
-         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto search = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
-         if (search == types.end()) {
-            _debug_printf("Couldn't find type used by OpConstant\n");
-            return SPV_ERROR_INVALID_ID;
-         }
-         auto values = std::vector<PValue>();
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+
+         std::vector<PValue> values;
+         values.reserve(parsedInstruction->num_operands - 2u);
          for (unsigned int i = 2u; i < parsedInstruction->num_operands; ++i) {
-            auto elemId = spirv::getOperand<spv::Id>(parsedInstruction, i);
-            auto searchElem = spvValues.find(elemId);
-            if (searchElem == spvValues.end()) {
-               _debug_printf("Couldn't find constant %u for constant composite %u\n", elemId, id);
-               return SPV_ERROR_INVALID_ID;
-            }
-            values.insert(values.end(), searchElem->second.value.cbegin(), searchElem->second.value.cend());
+            const SpirVValue &op = getStructForOperand(i);
+            values.insert(values.end(), op.value.cbegin(), op.value.cend());
          }
-         spvValues.emplace(id, SpirVValue{ SpirvFile::IMMEDIATE, search->second, values, search->second->getPaddings() });
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::IMMEDIATE, resType, values, resType->getPaddings() });
       }
       break;
    case spv::Op::OpConstantSampler:
       {
-         auto const typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto const searchType = types.find(typeId);
-         if (searchType == types.end()) {
-            _debug_printf("Couldn't find type %u used by OpConstantSampler\n", typeId);
-            return SPV_ERROR_INVALID_ID;
-         }
-         auto const resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto const addressingMode = spirv::getOperand<spv::SamplerAddressingMode>(parsedInstruction, 2u);
-         auto const param = spirv::getOperand<unsigned>(parsedInstruction, 3u);
-         auto const filterMode = spirv::getOperand<spv::SamplerFilterMode>(parsedInstruction, 4u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
 
-         auto const usesNormalizedCoords = param == 0u;
+         const auto addressingMode = spirv::getOperand<spv::SamplerAddressingMode>(parsedInstruction, 2u);
+         const word param = spirv::getOperand<word>(parsedInstruction, 3u);
+         const auto filterMode = spirv::getOperand<spv::SamplerFilterMode>(parsedInstruction, 4u);
+         const bool usesNormalizedCoords = param == 0u;
 
-         samplers.emplace(resId, Sampler{ reinterpret_cast<TypeSampler const*>(searchType->second), addressingMode, usesNormalizedCoords, filterMode });
+         samplers.emplace(resId, Sampler{ reinterpret_cast<TypeSampler const*>(resType), addressingMode, usesNormalizedCoords, filterMode });
       }
       break;
    case spv::Op::OpVariable:
@@ -2757,56 +2750,12 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpFOrdLessThanEqual:
    case spv::Op::OpFUnordLessThanEqual:
       {
-         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto op1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto op2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &op1Struct = getStructForOperand(2u);
+         const SpirVValue &op2Struct = getStructForOperand(3u);
 
-         auto op1 = getOp(op1Id);
-         if (op1.isUndefined()) {
-            _debug_printf("Couldn't find op1 with id %u\n", op1Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto op2 = getOp(op2Id);
-         if (op2.isUndefined()) {
-            _debug_printf("Couldn't find op2 with id %u\n", op2Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto type = types.find(typeId);
-         if (type == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         auto op1TypeSearch = spvValues.find(op1Id);
-         if (op1TypeSearch == spvValues.end()) {
-            _debug_printf("Couldn't fint type for id %u\n", op1Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto op1Type = op1TypeSearch->second.type;
-         auto op2TypeSearch = spvValues.find(op2Id);
-         if (op2TypeSearch == spvValues.end()) {
-            _debug_printf("Couldn't fint type for id %u\n", op2Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto op2Type = op2TypeSearch->second.type;
-
-         if (opcode == spv::Op::OpFOrdEqual ||
-             opcode == spv::Op::OpFOrdNotEqual ||
-             opcode == spv::Op::OpFOrdGreaterThan ||
-             opcode == spv::Op::OpFOrdGreaterThanEqual ||
-             opcode == spv::Op::OpFOrdLessThan ||
-             opcode == spv::Op::OpFOrdLessThanEqual) {
-         } else {
-         }
-         if (op1Type->getElementsNb() != op2Type->getElementsNb()) {
-            _debug_printf("op1 with id %u, and op2 with id %u, should have the same number of elements\n", op1Id, op2Id);
-            return SPV_ERROR_INVALID_BINARY;
-         }
-         if (op1Type->getElementsNb() != type->second->getElementsNb()) {
-            _debug_printf("op1 with id %u, and result type with id %u, should have the same number of elements\n", op1Id, typeId);
-            return SPV_ERROR_INVALID_BINARY;
-         }
+         const Type *op1Type = op1Struct.type;
 
          int isSrcSigned = -1;
          switch (opcode) {
@@ -2825,51 +2774,40 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          default:
             break;
          }
+         const DataType srcTy = (op1Type->getElementsNb() == 1u) ? op1Type->getEnumType(isSrcSigned)
+                                                                 : op1Type->getElementEnumType(0u, isSrcSigned);
 
-         auto pred = getScratch(1, FILE_PREDICATE);
-         mkCmp(OP_SET, convertCc(opcode), TYPE_U32, pred, op1Type->getEnumType(isSrcSigned), op1.value, op2.value);
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::PREDICATE, type->second, { pred }, type->second->getPaddings() });
+         std::vector<PValue> values;
+         values.reserve(resType->getElementsNb());
+         for (unsigned int i = 0u; i < resType->getElementsNb(); ++i) {
+            Value *op1 = op1Struct.getValue(this, i);
+            Value *op2 = op2Struct.getValue(this, i);
+
+            Value *predicate = getScratch(1, FILE_PREDICATE);
+            mkCmp(OP_SET, convertCc(opcode), TYPE_U32, predicate, srcTy, op1, op2);
+            values.emplace_back(predicate);
+         }
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
       }
       break;
    case spv::Op::OpSNegate:
    case spv::Op::OpFNegate:
       {
-         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto opId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &opStruct = getStructForOperand(2u);
+         const DataType dstTy = (resType->getElementsNb() == 1u) ? resType->getEnumType()
+                                                                 : resType->getElementEnumType(0u);
+         const unsigned int elemByteSize = typeSizeof(dstTy);
+         const operation op = convertOp(opcode);
 
-         auto type = types.find(typeId);
-         if (type == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
+         std::vector<PValue> values;
+         values.reserve(resType->getElementsNb());
+         for (unsigned int i = 0u; i < resType->getElementsNb(); ++i)
+            values.emplace_back(mkOp1v(op, dstTy, getScratch(elemByteSize), opStruct.getValue(this, i)));
 
-         auto operation = convertOp(opcode);
-
-         auto value = std::vector<PValue>();
-         if (type->second->getElementsNb() == 1u) {
-            auto op = getOp(opId, 0u);
-            if (op.isUndefined()) {
-               _debug_printf("Coudln't find op with id %u\n", opId);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-
-            auto *tmp = mkOp1v(operation, type->second->getEnumType(), getScratch(op.value->reg.size), op.value);
-            value.push_back(tmp);
-         } else {
-            for (unsigned int i = 0u; i < type->second->getElementsNb(); ++i) {
-               auto op = getOp(opId, i + 1u);
-               if (op.isUndefined()) {
-                  _debug_printf("Coudln't find op with id %u\n", opId);
-                  return SPV_ERROR_INVALID_LOOKUP;
-               }
-
-               auto *tmp = mkOp1v(operation, type->second->getElementEnumType(i), getScratch(op.value->reg.size), op.value);
-               value.push_back(tmp);
-            }
-         }
-
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, value, type->second->getPaddings() });
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
       }
       break;
    case spv::Op::OpIAdd:
@@ -2885,45 +2823,10 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpUMod:
    case spv::Op::OpFMod:
       {
-         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto op1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto op2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
-
-         auto type = types.find(typeId);
-         if (type == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         auto op1TypeSearch = spvValues.find(op1Id);
-         if (op1TypeSearch == spvValues.end()) {
-            _debug_printf("Couldn't fint type for id %u\n", op1Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto op1Type = op1TypeSearch->second.type;
-         auto op2TypeSearch = spvValues.find(op2Id);
-         if (op2TypeSearch == spvValues.end()) {
-            _debug_printf("Couldn't fint type for id %u\n", op2Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto op2Type = op2TypeSearch->second.type;
-
-         if (opcode == spv::Op::OpFAdd ||
-             opcode == spv::Op::OpFSub ||
-             opcode == spv::Op::OpFMul ||
-             opcode == spv::Op::OpFDiv ||
-             opcode == spv::Op::OpFMod) {
-         } else {
-         }
-         if (op1Type->getElementsNb() != op2Type->getElementsNb()) {
-            _debug_printf("op1 with id %u, and op2 with id %u, should have the same number of elements\n", op1Id, op2Id);
-            return SPV_ERROR_INVALID_BINARY;
-         }
-         if (op1Type->getElementsNb() != type->second->getElementsNb()) {
-            _debug_printf("op1 with id %u, and result type with id %u, should have the same number of elements\n", op1Id, typeId);
-            return SPV_ERROR_INVALID_BINARY;
-         }
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &op1Struct = getStructForOperand(2u);
+         const SpirVValue &op2Struct = getStructForOperand(3u);
 
          int isSrcSigned = -1;
          switch (opcode) {
@@ -2938,137 +2841,54 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          default:
             break;
          }
+         const DataType dstTy = (resType->getElementsNb() == 1u) ? resType->getEnumType(isSrcSigned)
+                                                                 : resType->getElementEnumType(0u, isSrcSigned);
+         const unsigned int elemByteSize = typeSizeof(dstTy);
+         const operation op = convertOp(opcode);
 
-         auto op = convertOp(opcode);
+         std::vector<PValue> values;
+         values.reserve(resType->getElementsNb());
+         for (unsigned int i = 0u; i < resType->getElementsNb(); ++i) {
+            Value *op1 = op1Struct.getValue(this, i);
+            Value *op2 = op2Struct.getValue(this, i);
 
-         auto value = std::vector<PValue>();
-         if (type->second->getElementsNb() == 1u) {
-            auto op1 = getOp(op1Id, 0u);
-            if (op1.isUndefined()) {
-               _debug_printf("Couldn't find op1 with id %u\n", op1Id);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-            auto op2 = getOp(op2Id, 0u);
-            if (op2.isUndefined()) {
-               _debug_printf("Couldn't find op2 with id %u\n", op2Id);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-
-            auto *tmp = mkOp2v(op, type->second->getEnumType(isSrcSigned), getScratch(op1.value->reg.size), op1.value, op2.value);
-            value.push_back(tmp);
-         } else {
-            for (unsigned int i = 0u; i < type->second->getElementsNb(); ++i) {
-               auto op1 = getOp(op1Id, i);
-               if (op1.isUndefined()) {
-                  _debug_printf("Couldn't find component %u for op1 with id %u\n", i, op1Id);
-                  return SPV_ERROR_INVALID_LOOKUP;
-               }
-               auto op2 = getOp(op2Id, i);
-               if (op2.isUndefined()) {
-                  _debug_printf("Couldn't find component %u for op2 with id %u\n", i, op2Id);
-                  return SPV_ERROR_INVALID_LOOKUP;
-               }
-
-               auto *tmp = mkOp2v(op, type->second->getElementEnumType(i, isSrcSigned), getScratch(op1.value->reg.size), op1.value, op2.value);
-               value.push_back(tmp);
-            }
+            values.emplace_back(mkOp2v(op, dstTy, getScratch(elemByteSize), op1, op2));
          }
 
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, value, type->second->getPaddings() });
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
       }
       break;
    case spv::Op::OpSRem:
    case spv::Op::OpFRem:
       {
-         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto op1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto op2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &op1Struct = getStructForOperand(2u);
+         const SpirVValue &op2Struct = getStructForOperand(3u);
 
-         auto type = types.find(typeId);
-         if (type == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
+         const int isSrcSigned = (opcode == spv::Op::OpSRem) ? 1 : -1;
+         const DataType dstTy = (resType->getElementsNb() == 1u) ? resType->getEnumType(isSrcSigned)
+                                                                 : resType->getElementEnumType(0u, isSrcSigned);
+         const unsigned int elemByteSize = typeSizeof(dstTy);
+
+         std::vector<PValue> values;
+         values.reserve(resType->getElementsNb());
+         for (unsigned int i = 0u; i < resType->getElementsNb(); ++i) {
+            Value *op1 = op1Struct.getValue(this, i);
+            Value *op2 = op2Struct.getValue(this, i);
+
+            Value *tmp1 = mkOp2v(OP_DIV, dstTy, getScratch(elemByteSize), op1, op2);
+            Value *tmp2 = mkOp2v(OP_MUL, dstTy, getScratch(elemByteSize), op2, tmp1);
+            Value *res = mkOp2v(OP_SUB, dstTy, getScratch(elemByteSize), op1, tmp2);
+
+            values.emplace_back(res);
          }
 
-         auto op1TypeSearch = spvValues.find(op1Id);
-         if (op1TypeSearch == spvValues.end()) {
-            _debug_printf("Couldn't fint type for id %u\n", op1Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto op1Type = op1TypeSearch->second.type;
-         auto op2TypeSearch = spvValues.find(op2Id);
-         if (op2TypeSearch == spvValues.end()) {
-            _debug_printf("Couldn't fint type for id %u\n", op2Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto op2Type = op2TypeSearch->second.type;
-
-         if (opcode == spv::Op::OpFAdd ||
-             opcode == spv::Op::OpFSub ||
-             opcode == spv::Op::OpFMul ||
-             opcode == spv::Op::OpFDiv ||
-             opcode == spv::Op::OpFMod) {
-         } else {
-         }
-         if (op1Type->getElementsNb() != op2Type->getElementsNb()) {
-            _debug_printf("op1 with id %u, and op2 with id %u, should have the same number of elements\n", op1Id, op2Id);
-            return SPV_ERROR_INVALID_BINARY;
-         }
-         if (op1Type->getElementsNb() != type->second->getElementsNb()) {
-            _debug_printf("op1 with id %u, and result type with id %u, should have the same number of elements\n", op1Id, typeId);
-            return SPV_ERROR_INVALID_BINARY;
-         }
-
-         int isSrcSigned = -1;
-         switch (opcode) {
-         case spv::Op::OpSRem:
-            isSrcSigned = 1;
-            break;
-         default:
-            break;
-         }
-
-         auto value = std::vector<PValue>();
-         if (type->second->getElementsNb() == 1u) {
-            auto op1 = getOp(op1Id, 0u).value;
-            if (op1 == nullptr) {
-               _debug_printf("Couldn't find op1 with id %u\n", op1Id);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-            auto op2 = getOp(op2Id, 0u).value;
-            if (op2 == nullptr) {
-               _debug_printf("Couldn't find op2 with id %u\n", op2Id);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-
-            auto *tmp1 = mkOp2v(OP_DIV, type->second->getEnumType(isSrcSigned), getScratch(op1->reg.size), op1, op2);
-            auto *tmp2 = mkOp2v(OP_MUL, type->second->getEnumType(isSrcSigned), getScratch(op1->reg.size), tmp1, op2);
-            auto *tmpRes = mkOp2v(OP_SUB, type->second->getEnumType(isSrcSigned), getScratch(op1->reg.size), op1, tmp2);
-            value.push_back(tmpRes);
-         } else {
-            for (unsigned int i = 0u; i < type->second->getElementsNb(); ++i) {
-               auto op1 = getOp(op1Id, i).value;
-               if (op1 == nullptr) {
-                  _debug_printf("Couldn't find composante %u for op1 with id %u\n", i, op1Id);
-                  return SPV_ERROR_INVALID_LOOKUP;
-               }
-               auto op2 = getOp(op2Id, i).value;
-               if (op2 == nullptr) {
-                  _debug_printf("Couldn't find composante %u op2 with id %u\n", i, op2Id);
-                  return SPV_ERROR_INVALID_LOOKUP;
-               }
-
-               auto *tmp1 = mkOp2v(OP_DIV, type->second->getElementEnumType(i, isSrcSigned), getScratch(op1->reg.size), op1, op2);
-               auto *tmp2 = mkOp2v(OP_MUL, type->second->getElementEnumType(i, isSrcSigned), getScratch(op1->reg.size), op2, tmp1);
-               auto *tmpRes = mkOp2v(OP_SUB, type->second->getElementEnumType(i, isSrcSigned), getScratch(op1->reg.size), op1, tmp2);
-               value.push_back(tmpRes);
-            }
-         }
-
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, value, type->second->getPaddings() });
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
       }
       break;
+   // TODO(pmoreau): Make use of the scope and memory semantics
+   // TODO(pmoreau): Need to check those opcodes again
    case spv::Op::OpAtomicExchange:
    case spv::Op::OpAtomicIIncrement:
    case spv::Op::OpAtomicIDecrement:
@@ -3082,32 +2902,13 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpAtomicOr:
    case spv::Op::OpAtomicXor:
       {
-         auto const has_no_value = (opcode == spv::Op::OpAtomicIIncrement) || (opcode == spv::Op::OpAtomicIDecrement);
+         const bool has_no_value = (opcode == spv::Op::OpAtomicIIncrement) || (opcode == spv::Op::OpAtomicIDecrement);
 
-         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto pointerId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto scope = spirv::getOperand<spv::Scope>(parsedInstruction, 3u);
-         auto memorySemantics = spirv::getOperand<spv::MemorySemanticsMask>(parsedInstruction, 4u);
-         auto valueId = has_no_value ? 0u : spirv::getOperand<spv::Id>(parsedInstruction, 5u);
-
-         auto type = types.find(typeId);
-         if (type == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         auto values = std::vector<PValue>();
-         auto pointer = getOp(pointerId, 0u).value; // Will that still work?
-         if (pointer == nullptr) {
-            _debug_printf("Couldn't find pointer with id %u\n", pointerId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto tmp_value = has_no_value ? nullptr : getOp(valueId, 0u).value;
-         if (tmp_value == nullptr && !has_no_value) {
-            _debug_printf("Couldn't find value with id %u\n", valueId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &pointerStruct = getStructForOperand(2u);
+         Value *pointer = pointerStruct.value.front().value;
+         Value *value = has_no_value ? nullptr : getStructForOperand(5u).value.front().value;
 
          int isSrcSigned = -1;
          switch (opcode) {
@@ -3123,71 +2924,40 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             break;
          }
 
-         Value* value = nullptr;
          if (opcode == spv::Op::OpAtomicIDecrement) {
-            value = getScratch(type->second->getSize());
-            mkMov(value, mkImm(-1), type->second->getEnumType(isSrcSigned));
-         } else if (opcode == spv::Op::OpAtomicISub) {
-            value = getScratch(type->second->getSize());
-            mkOp2(OP_SUB, type->second->getEnumType(isSrcSigned), value, mkImm(0), tmp_value);
-         } else {
-            value = tmp_value;
+            value = getScratch(resType->getSize());
+            mkMov(value, mkImm(-1), resType->getEnumType(isSrcSigned));
          }
 
-         auto tmp = getScratch(type->second->getSize());
-         auto base = acquire(SpirvFile::GLOBAL, spvValues.find(pointerId)->second.type);
-         auto insn = opcode == spv::Op::OpAtomicIIncrement ? mkOp1(OP_ATOM, type->second->getEnumType(isSrcSigned), tmp, base) : mkOp2(OP_ATOM, type->second->getEnumType(isSrcSigned), tmp, base, value);
+         Value *res = getScratch(resType->getSize());
+         Value *base = acquire(SpirvFile::GLOBAL, pointerStruct.type);
+         Instruction *insn = opcode == spv::Op::OpAtomicIIncrement ? mkOp1(OP_ATOM, resType->getEnumType(isSrcSigned), res, base)
+                                                                   : mkOp2(OP_ATOM, resType->getEnumType(isSrcSigned), res, base, value);
          insn->subOp = getSubOp(opcode);
          insn->setIndirect(0, 0, pointer);
          if (opcode == spv::Op::OpAtomicISub)
             insn->src(1).mod.neg();
-         values.push_back(tmp);
 
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, values, type->second->getPaddings() });
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, { res }, resType->getPaddings() });
       }
       break;
+   // TODO(pmoreau): Make use of the scope and memory semantics
    case spv::Op::OpAtomicCompareExchange:
       {
-         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto pointerId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto scope = spirv::getOperand<spv::Scope>(parsedInstruction, 3u);
-         auto memorySemanticsEqual = spirv::getOperand<spv::MemorySemanticsMask>(parsedInstruction, 4u);
-         auto memorySemanticsUnequal = spirv::getOperand<spv::MemorySemanticsMask>(parsedInstruction, 5u);
-         auto valueId = spirv::getOperand<spv::Id>(parsedInstruction, 6u);
-         auto comparatorId = spirv::getOperand<spv::Id>(parsedInstruction, 7u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &pointerStruct = getStructForOperand(2u);
+         Value *pointer = pointerStruct.value.front().value;
+         Value *value = getStructForOperand(6u).value.front().value;
+         Value *comparator = getStructForOperand(7u).value.front().value;
 
-         auto type = types.find(typeId);
-         if (type == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         auto values = std::vector<PValue>();
-         auto pointer = getOp(pointerId, 0u).value;
-         if (pointer == nullptr) {
-            _debug_printf("Couldn't find pointer with id %u\n", pointerId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto value = getOp(valueId, 0u).value;
-         if (value == nullptr) {
-            _debug_printf("Couldn't find value with id %u\n", valueId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto comparator = getOp(comparatorId, 0u).value;
-         if (comparator == nullptr) {
-            _debug_printf("Couldn't find comparator with id %u\n", comparatorId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         auto tmp = getScratch(type->second->getSize());
-         auto base = acquire(SpirvFile::GLOBAL, spvValues.find(pointerId)->second.type);
-         auto insn = mkOp3(OP_ATOM, type->second->getEnumType(), tmp, base, value, comparator);
+         Value *res = getScratch(resType->getSize());
+         auto base = acquire(SpirvFile::GLOBAL, pointerStruct.type);
+         Instruction *insn = mkOp3(OP_ATOM, resType->getEnumType(), res, base, value, comparator);
          insn->subOp = getSubOp(opcode);
          insn->setIndirect(0, 0, pointer);
-         values.push_back(tmp);
 
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, values, type->second->getPaddings() });
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, { res }, resType->getPaddings() });
       }
       break;
    case spv::Op::OpShiftLeftLogical:
@@ -3197,157 +2967,73 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpBitwiseXor:
    case spv::Op::OpBitwiseAnd:
       {
-         auto typeId = parsedInstruction->type_id;
-         auto resId = parsedInstruction->result_id;
-         auto op1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto op2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &op1 = getStructForOperand(2u);
+         const SpirVValue &op2 = getStructForOperand(3u);
 
-         auto type = types.find(typeId);
-         if (type == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         auto op1TypeSearch = spvValues.find(op1Id);
-         if (op1TypeSearch == spvValues.end()) {
-            _debug_printf("Couldn't fint type for id %u\n", op1Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto op1Type = op1TypeSearch->second.type;
-         auto op2TypeSearch = spvValues.find(op2Id);
-         if (op2TypeSearch == spvValues.end()) {
-            _debug_printf("Couldn't fint type for id %u\n", op2Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto op2Type = op2TypeSearch->second.type;
-
-         if (op1Type->getElementsNb() != op2Type->getElementsNb()) {
-            _debug_printf("op1 with id %u, and op2 with id %u, should have the same number of elements\n", op1Id, op2Id);
-            return SPV_ERROR_INVALID_BINARY;
-         }
-         if (op1Type->getElementsNb() != type->second->getElementsNb()) {
-            _debug_printf("op1 with id %u, and result type with id %u, should have the same number of elements\n", op1Id, typeId);
-            return SPV_ERROR_INVALID_BINARY;
-         }
-
-         auto op = convertOp(opcode);
-         const Type *elementType = type->second->getElementsNb() == 1u ? type->second : type->second->getElementType(0);
+         const operation op = convertOp(opcode);
+         const Type *elementType = resType->getElementsNb() == 1u ? resType : resType->getElementType(0u);
          int isSigned = 0;
          if (opcode == spv::Op::OpShiftRightArithmetic && isSignedIntType(elementType->getEnumType()))
             isSigned = 1;
-         DataType dstTy = elementType->getEnumType(isSigned);
+         const DataType dstTy = elementType->getEnumType(isSigned);
+         const unsigned int elemByteSize = elementType->getSize();
 
-         auto value = std::vector<PValue>();
-         if (type->second->getElementsNb() == 1u) {
-            auto op1 = getOp(op1Id, 0u);
-            if (op1.isUndefined()) {
-               _debug_printf("Couldn't find op1 with id %u\n", op1Id);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-            auto op2 = getOp(op2Id, 0u);
-            if (op2.isUndefined()) {
-               _debug_printf("Couldn't find op2 with id %u\n", op2Id);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-
-            auto *tmp = mkOp2v(op, dstTy, getScratch(op1.value->reg.size), op1.value, op2.value);
-            value.push_back(tmp);
-         } else {
-            for (unsigned int i = 0u; i < type->second->getElementsNb(); ++i) {
-               auto op1 = getOp(op1Id, i);
-               if (op1.isUndefined()) {
-                  _debug_printf("Couldn't find component %u for op1 with id %u\n", i, op1Id);
-                  return SPV_ERROR_INVALID_LOOKUP;
-               }
-               auto op2 = getOp(op2Id, i);
-               if (op2.isUndefined()) {
-                  _debug_printf("Couldn't find component %u for op2 with id %u\n", i, op2Id);
-                  return SPV_ERROR_INVALID_LOOKUP;
-               }
-
-               auto *tmp = mkOp2v(op, dstTy, getScratch(op1.value->reg.size), op1.value, op2.value);
-               value.push_back(tmp);
-            }
+         std::vector<PValue> values;
+         values.reserve(resType->getElementsNb());
+         for (unsigned int i = 0u; i < resType->getElementsNb(); ++i) {
+            Value *res = mkOp2v(op, dstTy, getScratch(elemByteSize), op1.getValue(this, i), op2.getValue(this, i));
+            values.emplace_back(res);
          }
 
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, value, type->second->getPaddings() });
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
 
       }
       break;
    case spv::Op::OpVectorTimesScalar:
       {
-         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto op1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto op2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &op1 = getStructForOperand(2u);
+         const SpirVValue &op2 = getStructForOperand(3u);
+         const DataType dstTy = resType->getElementEnumType(0u);
+         const unsigned int elemByteSize = resType->getElementSize(0u);
 
-         auto type = types.find(typeId);
-         if (type == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
+         std::vector<PValue> values;
+         values.reserve(resType->getElementsNb());
+         for (unsigned int i = 0u; i < resType->getElementsNb(); ++i) {
+            Value *res = mkOp2v(OP_MUL, dstTy, getScratch(elemByteSize), op1.getValue(this, i), op2.getValue(this, 0u));
+            values.emplace_back(res);
          }
 
-         auto value = std::vector<PValue>();
-         auto op2 = getOp(op2Id, 0u).value;
-         if (op2 == nullptr) {
-            _debug_printf("Couldn't find op2 with id %u\n", op2Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         for (unsigned int i = 0u; i < type->second->getElementsNb(); ++i) {
-            auto op1 = getOp(op1Id, i).value;
-            if (op1 == nullptr) {
-               _debug_printf("OpVectorTimesScalar %u: Couldn't find component %u op1 with id %u\n", resId, i, op1Id);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-
-            auto *tmp = mkOp2v(OP_MUL, type->second->getElementEnumType(i), getScratch(op1->reg.size), op1, op2);
-            value.push_back(tmp);
-         }
-
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, value, type->second->getPaddings() });
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
       }
       break;
    case spv::Op::OpVectorShuffle:
       {
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
          const spv::Id resId = parsedInstruction->result_id;
-         const spv::Id typeId = parsedInstruction->type_id;
-         const spv::Id vector1Id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         const spv::Id vector2Id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
-
-         auto searchVector1 = spvValues.find(vector1Id);
-         if (searchVector1 == spvValues.end()) {
-            _debug_printf("Failed to find var with id %u\n", vector1Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto searchVector2 = spvValues.find(vector2Id);
-         if (searchVector2 == spvValues.end()) {
-            _debug_printf("Failed to find var with id %u\n", vector2Id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         const Type *vector1Type = searchVector1->second.type;
-
-         auto searchResType = types.find(typeId);
-         if (searchResType == types.end()) {
-            _debug_printf("Failed to find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         const Type *resType = searchResType->second;
+         const SpirVValue &op1 = getStructForOperand(2u);
+         const SpirVValue &op2 = getStructForOperand(3u);
+         const unsigned int op1ElemNb = op1.type->getElementsNb();
 
          std::vector<PValue> values;
+         values.reserve(parsedInstruction->num_operands - 4u);
          for (uint16_t i = 4u; i < parsedInstruction->num_operands; ++i) {
             const word componentIndex = spirv::getOperand<word>(parsedInstruction, i);
             if (componentIndex == UINT32_MAX) {
-               Value *dst = getScratch(std::max(4u, resType->getElementSize(i - 4u)));
-               values.emplace_back(dst);
+               values.emplace_back(getScratch(std::max(4u, resType->getElementSize(i - 4u))));
                continue;
             }
 
-            const auto src = componentIndex < vector1Type->getElementsNb() ? searchVector1->second.value[componentIndex].value
-                                                                           : searchVector2->second.value[componentIndex - vector1Type->getElementsNb()].value;
+            Value *src = componentIndex < op1ElemNb ? op1.value[componentIndex].value
+                                                    : op2.value[componentIndex - op1ElemNb].value;
             Value *dst = getScratch(typeOfSize(std::max(static_cast<uint8_t>(4u), src->reg.size)));
             mkMov(dst, src, typeOfSize(std::max(4u, typeSizeof(src->reg.type))));
             values.emplace_back(dst);
          }
+
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
       }
       break;
@@ -3360,28 +3046,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpSatConvertSToU:
    case spv::Op::OpSatConvertUToS:
       {
-         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto srcId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-
-         auto src = getOp(srcId).value;
-         if (src == nullptr) {
-            _debug_printf("Couldn't find src with id %u\n", srcId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         auto type = types.find(typeId);
-         if (type == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         auto srcStruct = getStruct(srcId);
-         auto srcType = srcStruct.type;
-         if (srcType == nullptr) {
-             _debug_printf("Couldn't find type for id %u\n", srcId);
-             return SPV_ERROR_INVALID_LOOKUP;
-         }
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &src = getStructForOperand(2u);
 
          int isSrcSigned = -1;
          int isDstSigned = -1;
@@ -3422,61 +3089,36 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 
          int saturate = opcode == spv::Op::OpSatConvertSToU || opcode == spv::Op::OpSatConvertUToS;
 
-         Value *res = nullptr;
-         if (type->second->getSize() >= 4u && srcType->getSize() >= 4u) {
-            // FIXME doesn't work for vectors
-            res = getScratch(type->second->getSize());
-            mkCvt(OP_CVT, type->second->getEnumType(isDstSigned), res, srcType->getEnumType(isSrcSigned), src)->saturate = saturate;
-         } else {
-            res = src;
+         const unsigned int elemByteSize = std::max(4u, resType->getElementSize(0u));
+         const DataType dstTy = resType->getElementEnumType(0u, isDstSigned);
+         const DataType srcTy = src.type->getElementEnumType(0u, isSrcSigned);
+
+         std::vector<PValue> values;
+         values.reserve(resType->getElementsNb());
+         for (unsigned int i = 0u; i < resType->getElementsNb(); ++i) {
+            Value *res = getScratch(elemByteSize);
+            mkCvt(OP_CVT, dstTy, res, srcTy, src.value[i].value)->saturate = saturate;
+            values.emplace_back(res);
          }
 
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type->second, { res }, type->second->getPaddings() });
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
       }
       break;
    case spv::Op::OpControlBarrier:
       {
-         auto const scopeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto const memoryId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto const memorySemanticsId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         const ImmediateValue *scopeImm = getStructForOperand(0u).value.front().value->asImm();
+         const ImmediateValue *memoryImm = getStructForOperand(1u).value.front().value->asImm();
+         const ImmediateValue *memorySemanticsImm = getStructForOperand(2u).value.front().value->asImm();
 
-         auto searchScope = spvValues.find(scopeId);
-         if (searchScope == spvValues.end()) {
-            _debug_printf("Could not find scope %u\n", scopeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         ImmediateValue *scope = searchScope->second.value.front().value->asImm();
-         if (!scope) {
-            _debug_printf("Scope %u is not an immediate value\n", scopeId);
-            return SPV_ERROR_INVALID_ID;
-         }
-         auto searchMemory = spvValues.find(memoryId);
-         if (searchMemory == spvValues.end()) {
-            _debug_printf("Could not find memory %u\n", memoryId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         ImmediateValue *memory = searchMemory->second.value.front().value->asImm();
-         if (!memory) {
-            _debug_printf("Memory %u is not an immediate value\n", memoryId);
-            return SPV_ERROR_INVALID_ID;
-         }
-         auto searchMemorySemantics = spvValues.find(memorySemanticsId);
-         if (searchMemorySemantics == spvValues.end()) {
-            _debug_printf("Could not find memorySemantics %u\n", memorySemanticsId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         ImmediateValue *memorySemantics = searchMemorySemantics->second.value.front().value->asImm();
-         if (!memorySemantics) {
-            _debug_printf("MemorySemantics %u is not an immediate value\n", memorySemanticsId);
-            return SPV_ERROR_INVALID_ID;
-         }
+         const spv::Scope scope = static_cast<spv::Scope>(scopeImm->reg.data.u32);
+         const spv::Scope memory = static_cast<spv::Scope>(memoryImm->reg.data.u32);
+         const uint32_t memorySemantics = memorySemanticsImm->reg.data.u32;
 
-         if (static_cast<spv::Scope>(scope->reg.data.u32) != spv::Scope::Workgroup ||
-             static_cast<spv::Scope>(memory->reg.data.u32) != spv::Scope::Workgroup) {
+         if (scope != spv::Scope::Workgroup || memory != spv::Scope::Workgroup) {
             _debug_printf("Only workgroup scopes are currently supported.\n");
             return SPV_ERROR_INVALID_BINARY;
          }
-         if ((memorySemantics->reg.data.u32 & static_cast<uint32_t>(spv::MemorySemanticsMask::WorkgroupMemory)) != memorySemantics->reg.data.u32) {
+         if ((memorySemantics & static_cast<uint32_t>(spv::MemorySemanticsMask::WorkgroupMemory)) != memorySemantics) {
             _debug_printf("Only the workgroup memory semantics is currently supported.\n");
             return SPV_ERROR_INVALID_BINARY;
          }
@@ -3488,28 +3130,12 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpSampledImage:
       {
-         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto imageId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto samplerId = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &image = getStructForOperand(2u);
+         const Sampler &sampler = samplers.find(getIdOfOperand(3u))->second;
 
-         auto searchType = types.find(typeId);
-         if (searchType == types.end()) {
-            _debug_printf("Could not find type %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto searchImage = spvValues.find(imageId);
-         if (searchImage == spvValues.end()) {
-            _debug_printf("Could not find image %u\n", imageId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto searchSampler = samplers.find(samplerId);
-         if (searchSampler == samplers.end()) {
-            _debug_printf("Could not find sampler %u\n", samplerId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         sampledImages.emplace(resId, SampledImage{ reinterpret_cast<TypeSampledImage const*>(searchType->second), searchImage->second.value.front().value, searchSampler->second });
+         sampledImages.emplace(resId, SampledImage{ reinterpret_cast<TypeSampledImage const*>(resType), image.value.front().value, sampler });
       }
       break;
    case spv::Op::OpImageSampleExplicitLod:
