@@ -3084,7 +3084,13 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          values.reserve(resType->getElementsNb());
          for (unsigned int i = 0u; i < resType->getElementsNb(); ++i) {
             Value *res = getScratch(elemByteSize);
-            mkCvt(OP_CVT, dstTy, res, srcTy, src.value[i].value)->saturate = saturate;
+            if (opcode == spv::Op::OpConvertPtrToU && !src.value[i].isValue()) {
+               mkMov(res, mkImm(src.value[i].symbol->reg.data.offset), dstTy);
+               if (src.value[i].indirect != nullptr)
+                  mkOp2(OP_ADD, dstTy, res, res, src.value[i].indirect);
+            } else {
+               mkCvt(OP_CVT, dstTy, res, srcTy, src.value[i].value)->saturate = saturate;
+            }
             values.emplace_back(res);
          }
 
