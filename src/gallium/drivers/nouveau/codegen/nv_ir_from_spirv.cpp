@@ -173,6 +173,7 @@ public:
       virtual bool isCompooundType() const { return false; }
       virtual bool isVoidType() const { return false; }
       virtual std::vector<ImmediateValue *> generateConstant(Converter &conv, const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const { assert(false); return std::vector<ImmediateValue *>(); }
+      virtual std::vector<ImmediateValue *> generateBoolConstant(Converter &conv, bool value) const { assert(false); return std::vector<ImmediateValue *>(); }
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const = 0;
       virtual unsigned int getSize(void) const { assert(false); return 0u; }
       unsigned int getAlignment() const { return alignment; }
@@ -223,6 +224,7 @@ public:
       TypeBool(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeBool() {}
       virtual bool isBasicType() const override { return true; }
+      virtual std::vector<ImmediateValue *> generateBoolConstant(Converter &conv, bool value) const override;
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
       virtual unsigned int getSize(void) const override { return 1u; } // XXX no idea
       virtual enum DataType getEnumType(int isSigned = -1) const override;
@@ -575,6 +577,12 @@ Converter::TypeBool::TypeBool(const spv_parsed_instruction_t *const parsedInstru
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    alignment = 1u;
+}
+
+std::vector<ImmediateValue *>
+Converter::TypeBool::generateBoolConstant(Converter &conv, bool value) const
+{
+   return { value ? conv.mkImm(1u) : conv.mkImm(0u) };
 }
 
 std::vector<Value *>
@@ -1793,6 +1801,21 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 
          uint16_t operandIndex = 2u;
          const auto constants = resType->generateConstant(*this, parsedInstruction, operandIndex);
+         std::vector<PValue> values;
+         values.reserve(constants.size());
+         for (ImmediateValue *c : constants)
+            values.emplace_back(c);
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::IMMEDIATE, resType, values, resType->getPaddings() });
+      }
+      break;
+   case spv::Op::OpConstantTrue:
+   case spv::Op::OpConstantFalse:
+      {
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+
+         const auto constants = resType->generateBoolConstant(*this, opcode == spv::Op::OpConstantTrue);
          std::vector<PValue> values;
          values.reserve(constants.size());
          for (ImmediateValue *c : constants)
