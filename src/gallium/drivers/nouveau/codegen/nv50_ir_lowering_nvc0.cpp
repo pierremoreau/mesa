@@ -2849,6 +2849,11 @@ NVC0LoweringPass::handleCVT(Instruction *i)
    if (isFloatType(i->dType) || isFloatType(i->sType))
       return true;
 
+   if (i->dType == i->sType) {
+      i->op = OP_MOV;
+      return true;
+   }
+
    if (i->saturate && (typeSizeof(i->sType) > typeSizeof(i->dType))) {
       if (isSignedIntType(i->sType) && !isSignedIntType(i->dType)) {
          // Signed to unsigned: only need to clamp to 0
