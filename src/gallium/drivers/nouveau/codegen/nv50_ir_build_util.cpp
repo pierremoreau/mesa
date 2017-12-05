@@ -648,7 +648,7 @@ BuildUtil::mkMAD24(Value *dst, DataType dType, Value *src0, Value *src1,
          madsp->subOp = NV50_IR_SUBOP_MADSP_TUPLE(S24, S24, 32);
          break;
       case TYPE_U32:
-         madsp->subOp = NV50_IR_SUBOP_MADSP_TUPLE(U24, U24, 32);
+         madsp->subOp = NV50_IR_SUBOP_MADSP_TUPLE(U24, U16L, 32);
          break;
       default:
          assert(!"unsupported dType for MAD24!");
