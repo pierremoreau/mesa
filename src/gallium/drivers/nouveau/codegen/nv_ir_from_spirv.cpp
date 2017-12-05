@@ -186,7 +186,6 @@ public:
       virtual unsigned int getGlobalIdx(std::vector<unsigned int> const& elementIds, unsigned position = 0u) const { return 0u; }
       virtual void getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position = 0u) const { if (position < ids.size()) assert(false); }
       virtual bool isVectorOfSize(unsigned int /*size*/) const { return false; }
-      virtual bool isUInt() const { return false; }
 
       const spv::Op type;
       spv::Id id;
@@ -239,7 +238,6 @@ public:
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
       virtual unsigned int getSize(void) const override { return static_cast<uint32_t>(width) / 8u; }
       virtual enum DataType getEnumType(int isSigned = -1) const override;
-      virtual bool isUInt() const override { return !static_cast<bool>(signedness); }
 
       word width;
       word signedness;
@@ -3409,10 +3407,6 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
    case spv::BuiltIn::GlobalInvocationId:
    case spv::BuiltIn::GlobalSize:
       {
-         if (!dstType->isVectorOfSize(3u) || !dstType->getElementType(0u)->isUInt()) {
-            _debug_printf("Builtin %u should be a vector of 3 uint\n", builtin);
-            return SPV_ERROR_INVALID_BINARY;
-         }
          auto value = std::vector<PValue>{ vec3Func(0u), vec3Func(1u), vec3Func(2u) };
          spvValues.emplace(dstId, SpirVValue{ SpirvFile::TEMPORARY, dstType, value, { 1u, 1u, 1u } });
       }
