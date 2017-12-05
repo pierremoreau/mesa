@@ -1709,9 +1709,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpExtInstImport:
       {
-         const std::string setName = spirv::getOperand<const char*>(parsedInstruction, 1u);
-         if (setName != "OpenCL.std") {
-            _debug_printf("Extended instruction set \"%s\" is unsupported\n", setName.c_str());
+         const char *setName = spirv::getOperand<const char*>(parsedInstruction, 1u);
+         if (std::strcmp(setName, "OpenCL.std")) {
+            _debug_printf("Extended instruction set \"%s\" is unsupported\n", setName);
             return SPV_UNSUPPORTED;
          }
       }
@@ -1726,7 +1726,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          case SPV_EXT_INST_TYPE_OPENCL_STD:
             return convertOpenCLInstruction(id, type, static_cast<OpenCLLIB::Entrypoints>(extensionOpcode), parsedInstruction);
          default:
-            assert(false);
             return SPV_UNSUPPORTED;
          }
       }
@@ -1745,10 +1744,15 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          _debug_printf("Ignoring unsupported execution mode %u for entry point %u\n", entryPointId, executionMode);
       }
       break;
-   case spv::Op::OpSource:
-      return SPV_SUCCESS;
    case spv::Op::OpName:
       names.emplace(getIdOfOperand(0u), spirv::getOperand<const char*>(parsedInstruction, 1u));
+   case spv::Op::OpSourceContinued:
+   case spv::Op::OpSource:
+   case spv::Op::OpSourceExtension:
+   case spv::Op::OpMemberName:
+   case spv::Op::OpString:
+   case spv::Op::OpLine:
+   case spv::Op::OpNoLine:
       break;
    case spv::Op::OpDecorate:
       return convertDecorate(parsedInstruction);
@@ -1865,42 +1869,31 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpVariable:
       {
-         auto search = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
-         if (search == types.end()) {
-            _debug_printf("Couldn't find type used by OpVariable\n");
-            return SPV_ERROR_INVALID_ID;
-         }
-         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
          auto storage_file = getStorageFile(spirv::getOperand<spv::StorageClass>(parsedInstruction, 2u));
 
-         auto ptr = static_cast<TypePointer const*>(search->second);
-         auto isBuiltIn = false;
-         auto search_decorations = decorations.find(id);
+         bool isBuiltIn = false;
+         auto search_decorations = decorations.find(resId);
          if (search_decorations != decorations.end()) {
             isBuiltIn = search_decorations->second.find(spv::Decoration::BuiltIn) != search_decorations->second.end();
             auto search_linkage = search_decorations->second.find(spv::Decoration::BuiltIn);
             if (!isBuiltIn && search_linkage != search_decorations->second.end() && static_cast<spv::LinkageType>(search_linkage->second[0][0]) == spv::LinkageType::Import) {
-               _debug_printf("Variable %u has linkage type \"import\"! Missing a link step?\n", id);
+               _debug_printf("Variable %u has linkage type \"import\"! Missing a link step?\n", resId);
                return SPV_ERROR_INVALID_POINTER;
             }
          }
 
          if (parsedInstruction->num_operands == 4u) {
-            auto init_id = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
-            auto searchObject = spvValues.find(init_id);
-            if (searchObject == spvValues.end()) {
-               _debug_printf("Couldn't find initial value %u for variable %u\n", init_id, id);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
+            const SpirVValue &init = getStructForOperand(3u);
 
-            // If we have an immediate, which are stored in const memory,
+            // If we have an immediate, which is stored in const memory,
             // inline it
-            if (storage_file == SpirvFile::CONST && searchObject->second.storageFile == SpirvFile::IMMEDIATE)
-               spvValues.emplace(id, SpirVValue{ SpirvFile::IMMEDIATE, ptr, searchObject->second.value, searchObject->second.paddings });
-            else
-               spvValues.emplace(id, SpirVValue{ storage_file, ptr, searchObject->second.value, searchObject->second.paddings });
+            if (storage_file == SpirvFile::CONST && init.storageFile == SpirvFile::IMMEDIATE)
+               storage_file = SpirvFile::IMMEDIATE;
+            spvValues.emplace(resId, SpirVValue{ storage_file, resType, init.value, init.paddings });
          } else if (!isBuiltIn) {
-            acquire(storage_file, id, ptr);
+            acquire(storage_file, resId, resType);
          }
       }
       break;
@@ -1908,28 +1901,20 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpUndef:
       {
-         auto search = types.find(spirv::getOperand<spv::Id>(parsedInstruction, 0u));
-         if (search == types.end()) {
-            _debug_printf("Couldn't find type used by OpUndef\n");
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
 
-         auto constants = search->second->generateNullConstant(*this);
+         auto constants = resType->generateNullConstant(*this);
          std::vector<PValue> res;
          for (auto i : constants)
             res.push_back(i);
-         spvValues.emplace(id, SpirVValue{ SpirvFile::IMMEDIATE, search->second, res, search->second->getPaddings() });
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::IMMEDIATE, resType, res, resType->getPaddings() });
       }
       break;
    // TODO:
    // * use FunctionControl
    // * use decorations
    case spv::Op::OpFunction:
-      if (func != nullptr) {
-         _debug_printf("Defining a function inside another function is not allowed!\n");
-         return SPV_ERROR_INTERNAL;
-      }
       {
          spv::Id id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
          auto search_func = functions.find(id);
@@ -1939,12 +1924,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             return SPV_SUCCESS;
          }
 
-         auto resTypeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resTypeIter = types.find(resTypeId);
-         if (resTypeIter == types.end()) {
-            _debug_printf("Couldn't find return type %u of function %u\n", resTypeId, id);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
 
          using FCM = spv::FunctionControlMask;
          FCM control = spirv::getOperand<FCM>(parsedInstruction, 2u);
@@ -1971,8 +1951,8 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          blocks.emplace(static_cast<spv::Id>(0u), block);
          prog->calls.insert(&func->call);
 
-         if (!resTypeIter->second->isVoidType())
-            func->outs.emplace_back(getScratch(resTypeIter->second->getSize()));
+         if (!resType->isVoidType())
+            func->outs.emplace_back(getScratch(resType->getSize()));
 
          setPosition(block, true);
       }
@@ -1980,10 +1960,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    // TODO:
    // * use decorations
    case spv::Op::OpFunctionParameter:
-      if (func == nullptr) {
-         _debug_printf("Defining function parameters outside of function definition is not allowed\n");
-         return SPV_ERROR_INTERNAL;
-      }
       {
          spv::Id id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
          spv::Id type = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
@@ -2032,10 +2008,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       }
       break;
    case spv::Op::OpFunctionEnd:
-      if (func == nullptr) {
-         _debug_printf("Reached end of function while not defining one\n");
-         return SPV_ERROR_INTERNAL;
-      }
       {
          for (auto i : phiToMatch) {
             auto phiId = i.first;
@@ -2122,33 +2094,18 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpFunctionCall:
       {
-         auto resTypeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto resTypeIter = types.find(resTypeId);
-         if (resTypeIter == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", resTypeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto resType = resTypeIter->second;
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
 
-         auto resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto functionId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         const spv::Id functionId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
 
-         auto insn = mkFlow(OP_CALL, nullptr, CC_ALWAYS, NULL);
+         FlowInstruction *insn = mkFlow(OP_CALL, nullptr, CC_ALWAYS, NULL);
 
-         for (size_t i = 3u, j = 0u; i < parsedInstruction->num_operands; ++i, ++j) {
-            auto const argId = spirv::getOperand<spv::Id>(parsedInstruction, i);
-            auto argIter = spvValues.find(argId);
-            if (argIter == spvValues.end()) {
-               _debug_printf("Couldn't not find %uth argument %u of function call %u\n", j, argId, functionId);
-               return SPV_ERROR_INVALID_LOOKUP;
-            }
-            insn->setSrc(i - 3u, argIter->second.value.front().value);
-         }
+         for (size_t i = 3u; i < parsedInstruction->num_operands; ++i)
+            insn->setSrc(i - 3u, getStructForOperand(i).value.front().value);
 
-         Instruction *resInsn = nullptr;
-         Value *res = nullptr;
          if (!resType->isVoidType()) {
-            res = getScratch(resType->getSize());
+            Value *res = getScratch(resType->getSize());
             insn->setDef(0, res);
             spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, { res }, resType->getPaddings() });
          }
@@ -2161,10 +2118,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       }
       break;
    case spv::Op::OpLabel:
-      if (bb != nullptr && blocks.size() != 1u) {
-         _debug_printf("Defining a block inside another block is not allowed\n");
-         return SPV_ERROR_INTERNAL;
-      }
       {
          BasicBlock *block = new BasicBlock(func);
 
@@ -2175,7 +2128,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             blocks[0u]->cfg.attach(&block->cfg, Graph::Edge::TREE);
          }
 
-         auto id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         const spv::Id id = parsedInstruction->result_id;
          auto searchFlows = branchesToMatch.find(id);
          if (searchFlows != branchesToMatch.end()) {
             for (auto& flow : searchFlows->second) {
@@ -2190,10 +2143,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       }
       break;
    case spv::Op::OpReturn:
-      if (bb == nullptr) {
-         _debug_printf("Reached end of block while not defining one\n");
-         return SPV_ERROR_INTERNAL;
-      }
       {
          BasicBlock *leave = BasicBlock::get(func->cfgExit);
          mkFlow(OP_BRA, leave, CC_ALWAYS, nullptr);
@@ -2203,10 +2152,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       }
       break;
    case spv::Op::OpReturnValue:
-      if (bb == nullptr) {
-         _debug_printf("Reached end of block while not defining one\n");
-         return SPV_ERROR_INTERNAL;
-      }
       {
          auto retId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto retIter = spvValues.find(retId);
@@ -2225,10 +2170,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       }
       break;
    case spv::Op::OpBranch:
-      if (bb == nullptr) {
-         _debug_printf("Reached end of block while not defining one\n");
-         return SPV_ERROR_INTERNAL;
-      }
       {
          auto labelId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto searchLabel = blocks.find(labelId);
@@ -2248,10 +2189,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       }
       break;
    case spv::Op::OpBranchConditional:
-      if (bb == nullptr) {
-         _debug_printf("Reached end of block while not defining one\n");
-         return SPV_ERROR_INTERNAL;
-      }
       {
          auto predId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          auto ifId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
@@ -3246,19 +3183,18 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 spv_result_t
 Converter::convertEntryPoint(const spv_parsed_instruction_t *parsedInstruction)
 {
-   std::string name = spirv::getOperand<const char*>(parsedInstruction, 2u);
-   unsigned int nextOperand = name.size() / 4u + (name.size() % 4u) != 0u;
-   std::vector<spv::Id> references = std::vector<spv::Id>();
-   for (unsigned int i = nextOperand; i < parsedInstruction->num_operands; ++i)
-      references.push_back(spirv::getOperand<spv::Id>(parsedInstruction, i));
-   EntryPoint entryPoint = { static_cast<uint32_t>(entryPoints.size()), spirv::getOperand<spv::ExecutionModel>(parsedInstruction, 0u),
-                             name, references
-   };
-   spv::Id id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+   EntryPoint entryPoint;
+   entryPoint.index = static_cast<uint32_t>(entryPoints.size());
+   entryPoint.executionModel = spirv::getOperand<spv::ExecutionModel>(parsedInstruction, 0u);
+   entryPoint.name = spirv::getOperand<const char*>(parsedInstruction, 2u);
+   entryPoint.interface.reserve(parsedInstruction->num_operands - 3u);
+
+   for (unsigned int i = 3u; i < parsedInstruction->num_operands; ++i)
+      entryPoint.interface.push_back(spirv::getOperand<spv::Id>(parsedInstruction, i));
+
+   const spv::Id id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
    entryPoints.emplace(id, entryPoint);
-   auto search = names.find(id);
-   if (search == names.end())
-      names.emplace(id, name);
+   names.emplace(id, entryPoint.name);
 
    return SPV_SUCCESS;
 }
