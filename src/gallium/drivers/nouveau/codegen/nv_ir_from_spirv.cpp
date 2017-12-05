@@ -3252,6 +3252,19 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
    auto const& type = dstType->getElementType(0u);
    auto const typeEnum = type->getEnumType();
    auto const typeSize = type->getSize();
+   auto getWorkDim = [&](unsigned int id){
+      auto workDimSysval = mkSysVal(SV_WORK_DIM, id);
+      auto workDimReg = getScratch(workDimSysval->reg.size);
+      mkOp1(OP_RDSV, workDimSysval->reg.type, workDimReg, workDimSysval);
+      if (workDimSysval->reg.type != typeEnum) {
+         auto res = getScratch(typeSize);
+         mkCvt(OP_CVT, typeEnum, res, workDimSysval->reg.type, workDimReg);
+         return res;
+      } else {
+         return workDimReg;
+      }
+
+   };
    auto getTid = [&](unsigned int id){
       auto tidSysval = mkSysVal(SV_TID, id);
       auto tidReg = getScratch(tidSysval->reg.size);
@@ -3333,6 +3346,8 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
 
    std::function<Value *(unsigned int)> vec3Func;
    switch (builtin) {
+   case spv::BuiltIn::WorkDim:
+      vec3Func = getWorkDim;
    case spv::BuiltIn::LocalInvocationId:
       vec3Func = getTid;
       break;
@@ -3352,6 +3367,7 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
       break;
    }
    switch (builtin) {
+   case spv::BuiltIn::WorkDim:
    case spv::BuiltIn::LocalInvocationId:
    case spv::BuiltIn::WorkgroupSize:
    case spv::BuiltIn::WorkgroupId:
