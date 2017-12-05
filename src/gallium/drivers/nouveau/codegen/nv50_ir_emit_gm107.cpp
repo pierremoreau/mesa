@@ -3974,18 +3974,20 @@ SchedDataCalculatorGM107::findFirstUse(const Instruction *bari) const
 
       for (int s = 0; insn->srcExists(s); ++s) {
          const Value *src = insn->src(s).rep();
-         if (bari->def(0).getFile() == FILE_GPR) {
-            if (insn->src(s).getFile() != FILE_GPR ||
-                src->reg.data.id + src->reg.size / 4 - 1 < minGPR ||
-                src->reg.data.id > maxGPR)
-               continue;
-            return insn;
-         } else
-         if (bari->def(0).getFile() == FILE_PREDICATE) {
-            if (insn->src(s).getFile() != FILE_PREDICATE ||
-                src->reg.data.id != minGPR)
-               continue;
-            return insn;
+         for (int d = 0; bari->defExists(d); ++d) {
+            if (bari->def(d).getFile() == FILE_GPR) {
+               if (insn->src(s).getFile() != FILE_GPR ||
+                   src->reg.data.id + src->reg.size / 4 - 1 < minGPR ||
+                   src->reg.data.id > maxGPR)
+                  continue;
+               return insn;
+            } else
+            if (bari->def(d).getFile() == FILE_PREDICATE) {
+               if (insn->src(s).getFile() != FILE_PREDICATE ||
+                   src->reg.data.id != minGPR)
+                  continue;
+               return insn;
+            }
          }
       }
    }
