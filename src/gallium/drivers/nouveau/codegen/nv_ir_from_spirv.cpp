@@ -1948,7 +1948,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          BasicBlock *block = new BasicBlock(func);
          func->setEntry(block);
          func->setExit(new BasicBlock(func));
-         blocks.emplace(static_cast<spv::Id>(0u), block);
          prog->calls.insert(&func->call);
 
          if (!resType->isVoidType())
@@ -2119,27 +2118,22 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpLabel:
       {
-         BasicBlock *block = new BasicBlock(func);
-
-         // Attach to first block, which is the block containing the loading of
-         // the function parameters.
-         if (blocks.size() == 1u) {
-            mkFlow(OP_BRA, block, CC_ALWAYS, nullptr);
-            blocks[0u]->cfg.attach(&block->cfg, Graph::Edge::TREE);
-         }
+         // A BB is created on function creation to store loads of arguments,
+         // so only create one if this is not the first BB of the function.
+         if (!blocks.empty())
+            setPosition(new BasicBlock(func), true);
 
          const spv::Id id = parsedInstruction->result_id;
+         blocks.emplace(id, bb);
+
          auto searchFlows = branchesToMatch.find(id);
          if (searchFlows != branchesToMatch.end()) {
             for (auto& flow : searchFlows->second) {
-               flow->bb->getExit()->asFlow()->target.bb = block;
-               flow->bb->cfg.attach(&block->cfg, (block->cfg.incidentCount() == 0u) ? Graph::Edge::TREE : Graph::Edge::FORWARD);
+               flow->bb->getExit()->asFlow()->target.bb = bb;
+               flow->bb->cfg.attach(&bb->cfg, (bb->cfg.incidentCount() == 0u) ? Graph::Edge::TREE : Graph::Edge::FORWARD);
             }
             branchesToMatch.erase(searchFlows);
          }
-
-         blocks.emplace(id, block);
-         setPosition(block, true);
       }
       break;
    case spv::Op::OpReturn:
@@ -2147,8 +2141,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          BasicBlock *leave = BasicBlock::get(func->cfgExit);
          mkFlow(OP_BRA, leave, CC_ALWAYS, nullptr);
          bb->cfg.attach(&leave->cfg, (leave->cfg.incidentCount() == 0) ? Graph::Edge::TREE : Graph::Edge::FORWARD);
-
-         bb = nullptr;
       }
       break;
    case spv::Op::OpReturnValue:
@@ -2165,8 +2157,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          BasicBlock *leave = BasicBlock::get(func->cfgExit);
          mkFlow(OP_BRA, leave, CC_ALWAYS, nullptr);
          bb->cfg.attach(&leave->cfg, (leave->cfg.incidentCount() == 0) ? Graph::Edge::TREE : Graph::Edge::FORWARD);
-
-         bb = nullptr;
       }
       break;
    case spv::Op::OpBranch:
@@ -2184,8 +2174,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             mkFlow(OP_BRA, searchLabel->second, CC_ALWAYS, nullptr);
             bb->cfg.attach(&searchLabel->second->cfg, Graph::Edge::BACK);
          }
-
-         bb = nullptr;
       }
       break;
    case spv::Op::OpBranchConditional:
@@ -2229,8 +2217,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             mkFlow(OP_BRA, searchElse->second, CC_ALWAYS, nullptr);
             bb->cfg.attach(&searchElse->second->cfg, Graph::Edge::BACK);
          }
-
-         bb = nullptr;
       }
       break;
    case spv::Op::OpPhi:
