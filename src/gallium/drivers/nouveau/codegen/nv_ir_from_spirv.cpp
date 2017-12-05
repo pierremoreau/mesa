@@ -104,7 +104,9 @@ int isSrcSigned(spv::Op opcode)
    case spv::Op::OpAtomicUMax:
    case spv::Op::OpUConvert:
    case spv::Op::OpConvertUToF:
+   case spv::Op::OpConvertPtrToU:
    case spv::Op::OpSatConvertUToS:
+   case spv::Op::OpConvertUToPtr:
       return 0;
    default:
       return -1;
@@ -123,7 +125,9 @@ int isDstSigned(spv::Op opcode)
       return 1;
    case spv::Op::OpUConvert:
    case spv::Op::OpConvertFToU:
+   case spv::Op::OpConvertPtrToU:
    case spv::Op::OpSatConvertSToU:
+   case spv::Op::OpConvertUToPtr:
       return 0;
    default:
       return -1;
@@ -3058,8 +3062,10 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpConvertFToU:
    case spv::Op::OpConvertSToF:
    case spv::Op::OpConvertFToS:
+   case spv::Op::OpConvertPtrToU:
    case spv::Op::OpSatConvertSToU:
    case spv::Op::OpSatConvertUToS:
+   case spv::Op::OpConvertUToPtr:
       {
          const Type *resType = types.find(parsedInstruction->type_id)->second;
          const spv::Id resId = parsedInstruction->result_id;
