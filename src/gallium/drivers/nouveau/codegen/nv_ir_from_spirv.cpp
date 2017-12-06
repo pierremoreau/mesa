@@ -3152,6 +3152,83 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 //         st->cache = tgsi.getCacheMode();
       }
       break;
+   case spv::Op::OpIsInf:
+   case spv::Op::OpIsNan:
+   case spv::Op::OpIsFinite:
+   case spv::Op::OpIsNormal:
+      {
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SpirVValue &op = getStructForOperand(2u);
+         const DataType dstTy = (resType->getElementsNb() == 1u) ? resType->getEnumType()
+                                                                 : resType->getElementEnumType(0u);
+         const unsigned int elemByteSize = typeSizeof(dstTy);
+
+         std::vector<PValue> values;
+         values.reserve(resType->getElementsNb());
+
+         for (unsigned int i = 0u; i < resType->getElementsNb(); ++i) {
+            Value *src = op.getValue(this, i);
+            Value *tmp = getScratch(4);
+            Value *pred = getScratch(1, FILE_PREDICATE);
+
+            CondCode cc;
+            switch(opcode) {
+            case spv::Op::OpIsInf:
+               cc = CC_EQ;
+               break;
+            case spv::Op::OpIsNan:
+               cc = CC_GT;
+               break;
+            case spv::Op::OpIsNormal:
+            case spv::Op::OpIsFinite:
+               cc = CC_LT;
+               break;
+            }
+
+            mkOp2(OP_AND, TYPE_U32, tmp, src, loadImm(getScratch(4), 0x7fffffff));
+            mkCmp(OP_SET, cc, TYPE_U32, pred, TYPE_U32, tmp, loadImm(getScratch(4), 0x7f800000));
+            if (opcode == spv::Op::OpIsNormal) {
+               mkCmp(OP_SET_AND, CC_GE, TYPE_U32, pred, TYPE_U32, tmp, loadImm(getScratch(4), 0x00800000), pred);
+               mkCmp(OP_SET_OR, CC_EQ, TYPE_U32, pred, TYPE_U32, tmp, loadImm(getScratch(4), 0x0), pred);
+            }
+            values.emplace_back(pred);
+         }
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
+      }
+      break;
+   // TODO: aggregate types and booleans.
+   case spv::Op::OpSelect:
+      {
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+
+         const SpirVValue &opC = getStructForOperand(2u);
+         const SpirVValue &op0 = getStructForOperand(3u);
+         const SpirVValue &op1 = getStructForOperand(4u);
+
+         const DataType dstTy = (resType->getElementsNb() == 1u) ? resType->getEnumType()
+                                                                 : resType->getElementEnumType(0u);
+         const unsigned int elemByteSize = typeSizeof(dstTy);
+
+         std::vector<PValue> values;
+         values.reserve(resType->getElementsNb());
+
+         for (unsigned int i = 0u; i < resType->getElementsNb(); ++i) {
+            Value *srcC = opC.getValue(this, i);
+            Value *src0 = op0.getValue(this, i);
+            Value *src1 = op1.getValue(this, i);
+            Value *dst  = getScratch(src0->reg.size, src0->reg.file);
+
+            mkOp3(OP_SELP, dstTy, dst, src0, src1, srcC);
+
+            values.emplace_back(dst);
+         }
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
+      }
+      break;
    default:
       _debug_printf("Unsupported opcode %u\n", opcode);
       return SPV_UNSUPPORTED;
