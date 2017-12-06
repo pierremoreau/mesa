@@ -3275,123 +3275,42 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
 {
    auto const builtin = static_cast<spv::BuiltIn>(decLiterals[0u]);
 
-   auto const& type = dstType->getElementType(0u);
-   auto const typeEnum = type->getEnumType();
-   auto const typeSize = type->getSize();
-   auto getWorkDim = [&](unsigned int id){
-      auto workDimSysval = mkSysVal(SV_WORK_DIM, id);
-      auto workDimReg = getScratch(workDimSysval->reg.size);
-      mkOp1(OP_RDSV, workDimSysval->reg.type, workDimReg, workDimSysval);
-      if (workDimSysval->reg.type != typeEnum) {
-         auto res = getScratch(typeSize);
-         mkCvt(OP_CVT, typeEnum, res, workDimSysval->reg.type, workDimReg);
-         return res;
-      } else {
-         return workDimReg;
-      }
-
-   };
-   auto getTid = [&](unsigned int id){
-      auto tidSysval = mkSysVal(SV_TID, id);
-      auto tidReg = getScratch(tidSysval->reg.size);
-      mkOp1(OP_RDSV, tidSysval->reg.type, tidReg, tidSysval);
-      if (tidSysval->reg.type != typeEnum) {
-         auto res = getScratch(typeSize);
-         mkCvt(OP_CVT, typeEnum, res, tidSysval->reg.type, tidReg);
-         return res;
-      } else {
-         return tidReg;
-      }
-
-   };
-   auto getNtid = [&](unsigned int id){
-      auto ntidSysval = mkSysVal(SV_NTID, id);
-      auto ntidReg = getScratch(ntidSysval->reg.size);
-      mkOp1(OP_RDSV, ntidSysval->reg.type, ntidReg, ntidSysval);
-      if (ntidSysval->reg.type != typeEnum) {
-         auto res = getScratch(typeSize);
-         mkCvt(OP_CVT, typeEnum, res, ntidSysval->reg.type, ntidReg);
-         return res;
-      } else {
-         return ntidReg;
-      }
-   };
-   auto getCtaid = [&](unsigned int index){
-      auto ctaidSysval = mkSysVal(SV_CTAID, index);
-      auto ctaidReg = getScratch(ctaidSysval->reg.size);
-      mkOp1(OP_RDSV, ctaidSysval->reg.type, ctaidReg, ctaidSysval);
-      if (ctaidSysval->reg.type != typeEnum) {
-         auto res = getScratch(typeSize);
-         mkCvt(OP_CVT, typeEnum, res, ctaidSysval->reg.type, ctaidReg);
-         return res;
-      } else {
-         return ctaidReg;
-      }
-   };
-   auto getGid = [&](unsigned int index){
-      auto tidSysval = mkSysVal(SV_TID, index);
-      auto ntidSysval = mkSysVal(SV_NTID, index);
-      auto ctaidSysval = mkSysVal(SV_CTAID, index);
-
-      auto sysValType = tidSysval->reg.type;
-      auto sysValSize = tidSysval->reg.size;
-      assert(sysValType == ntidSysval->reg.type && sysValType == ctaidSysval->reg.type);
-
-      auto tid    = mkOp1v(OP_RDSV, sysValType, getScratch(sysValSize), tidSysval);
-      auto ntid   = mkOp1v(OP_RDSV, sysValType, getScratch(sysValSize), ntidSysval);
-      auto ctaid  = mkOp1v(OP_RDSV, sysValType, getScratch(sysValSize), ctaidSysval);
-      auto tmp    = mkOp2v(OP_ADD,  sysValType, getScratch(sysValSize), tid, mkImm(0u)); // FIXME should be GID_OFF
-      auto tmpRes = mkOp3v(OP_MAD,  sysValType, getScratch(sysValSize), ntid, ctaid, tmp);
-      if (sysValType != typeEnum) {
-         auto res = getScratch(typeSize);
-         mkCvt(OP_CVT, typeEnum, res, sysValType, tmpRes);
-         return res;
-      } else {
-         return tmpRes;
-      }
-   };
-   auto getNGid = [&](unsigned int index){
-      auto ntidSysval = mkSysVal(SV_NTID, index);
-      auto nctaidSysval = mkSysVal(SV_NCTAID, index);
-
-      auto sysValType = ntidSysval->reg.type;
-      auto sysValSize = ntidSysval->reg.size;
-      assert(sysValType == nctaidSysval->reg.type);
-
-      auto ntid   = mkOp1v(OP_RDSV, sysValType, getScratch(sysValSize), ntidSysval);
-      auto nctaid = mkOp1v(OP_RDSV, sysValType, getScratch(sysValSize), nctaidSysval);
-      auto tmp    = mkOp2v(OP_MUL,  sysValType, getScratch(sysValSize), ntid, nctaid);
-      if (sysValType != typeEnum) {
-         auto res = getScratch(typeSize);
-         mkCvt(OP_CVT, typeEnum, res, sysValType, tmp);
-         return res;
-      } else {
-         return tmp;
-      }
+   auto getSysVal = [this](SVSemantic svName, uint32_t index){
+      return mkOp1v(OP_RDSV, TYPE_U32, getScratch(), mkSysVal(svName, index));
    };
 
    std::function<Value *(unsigned int)> vec3Func;
    switch (builtin) {
    case spv::BuiltIn::WorkDim:
-      vec3Func = getWorkDim;
+      vec3Func = [getSysVal,this](unsigned int index){ return getSysVal(SV_WORK_DIM, index); };
    case spv::BuiltIn::LocalInvocationId:
-      vec3Func = getTid;
+      vec3Func = [getSysVal,this](unsigned int index){ return getSysVal(SV_TID, index); };
       break;
    case spv::BuiltIn::WorkgroupSize:
-      vec3Func = getNtid;
+      vec3Func = [getSysVal,this](unsigned int index){ return getSysVal(SV_NTID, index); };
       break;
    case spv::BuiltIn::WorkgroupId:
-      vec3Func = getCtaid;
+      vec3Func = [getSysVal,this](unsigned int index){ return getSysVal(SV_CTAID, index); };
       break;
    case spv::BuiltIn::GlobalInvocationId:
-      vec3Func = getGid;
+      vec3Func = [getSysVal,this](unsigned int index){
+         // FIXME: the proper formula is (ntid * ctaid) + tid + gid_off
+         return mkOp3v(OP_MAD,  TYPE_U32, getScratch(), getSysVal(SV_NTID, index), getSysVal(SV_CTAID, index), getSysVal(SV_TID, index));
+      };
       break;
    case spv::BuiltIn::GlobalSize:
-      vec3Func = getNGid;
+      vec3Func = [getSysVal,this](unsigned int index){
+         return mkOp2v(OP_MUL, TYPE_U32, getScratch(), getSysVal(SV_NTID, index), getSysVal(SV_NCTAID, index));
+      };
       break;
    default:
       break;
    }
+
+   auto const& type = dstType->getElementType(0u);
+   auto const typeEnum = type->getEnumType();
+   auto const typeSize = type->getSize();
+
    switch (builtin) {
    case spv::BuiltIn::WorkDim:
    case spv::BuiltIn::LocalInvocationId:
@@ -3400,8 +3319,16 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
    case spv::BuiltIn::GlobalInvocationId:
    case spv::BuiltIn::GlobalSize:
       {
-         auto value = std::vector<PValue>{ vec3Func(0u), vec3Func(1u), vec3Func(2u) };
-         spvValues.emplace(dstId, SpirVValue{ SpirvFile::TEMPORARY, dstType, value, { 1u, 1u, 1u } });
+         std::vector<PValue> values = { vec3Func(0u), vec3Func(1u), vec3Func(2u) };
+         for (PValue &value : values) {
+            const DataType builtinEnum = value.value->reg.type;
+            if (builtinEnum == typeEnum)
+               continue;
+            Value *res = getScratch(typeSize);
+            mkCvt(OP_CVT, typeEnum, res, builtinEnum, value.value);
+            value.value = res;
+         }
+         spvValues.emplace(dstId, SpirVValue{ SpirvFile::TEMPORARY, dstType, values, { 1u, 1u, 1u } });
       }
       break;
    default:
