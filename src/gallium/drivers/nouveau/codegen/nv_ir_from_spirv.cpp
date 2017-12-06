@@ -2178,16 +2178,10 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpBranchConditional:
       {
-         auto predId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto ifId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto elseId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         Value *pred = getStructForOperand(0u).value.front().value;
+         const spv::Id ifId = getIdOfOperand(1u);
+         const spv::Id elseId = getIdOfOperand(2u);
 
-         auto searchPred = spvValues.find(predId);
-         if (searchPred == spvValues.end()) {
-            _debug_printf("Couldn't find predicate with id %u\n", predId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto pred = searchPred->second.value[0].value;
          auto searchIf = blocks.find(ifId);
          if (searchIf == blocks.end()) {
             auto flow = mkFlow(OP_BRA, nullptr, CC_P, pred);
