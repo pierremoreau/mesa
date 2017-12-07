@@ -3376,6 +3376,67 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::Nextafter:
+      {
+         // TODO: fix nextafter(0, -1)
+         auto op1 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 4u), 0u);
+         auto op2 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 5u), 0u);
+         auto tmp = getScratch();
+         auto res = getScratch();
+         auto pred = getScratch(1, FILE_PREDICATE);
+
+         mkCmp(OP_SLCT, CC_GE, TYPE_S32, tmp, TYPE_F32, loadImm(getScratch(), 1), loadImm(getScratch(), -1), op1);
+
+         BasicBlock *tBB = new BasicBlock(func);
+         BasicBlock *fBB = new BasicBlock(func);
+         BasicBlock *endBB = new BasicBlock(func);
+
+         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+         bb->cfg.attach(&tBB->cfg, Graph::Edge::TREE);
+         mkCmp(OP_SET, CC_GT, TYPE_U8, pred, TYPE_F32, op2, op1);
+         mkFlow(OP_BRA, tBB, CC_P, pred);
+
+         setPosition(fBB, true);
+         fBB = new BasicBlock(func);
+         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+         mkFlow(OP_BRA, fBB, CC_ALWAYS, nullptr);
+
+         setPosition(tBB, true);
+         mkOp2(OP_ADD, TYPE_S32, res, op1, tmp);
+         tBB->cfg.attach(&endBB->cfg, Graph::Edge::FORWARD);
+         mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+         setPosition(fBB, true);
+
+         tBB = new BasicBlock(func);
+         fBB = new BasicBlock(func);
+
+         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+         bb->cfg.attach(&tBB->cfg, Graph::Edge::TREE);
+         mkCmp(OP_SET, CC_LT, TYPE_U8, pred, TYPE_F32, op2, op1);
+         mkFlow(OP_BRA, tBB, CC_P, pred);
+
+         setPosition(fBB, true);
+         fBB = new BasicBlock(func);
+         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+         mkFlow(OP_BRA, fBB, CC_ALWAYS, nullptr);
+
+         setPosition(tBB, true);
+         mkOp2(OP_SUB, TYPE_S32, res, op1, tmp);
+         tBB->cfg.attach(&endBB->cfg, Graph::Edge::FORWARD);
+         mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+         setPosition(fBB, true);
+         bb->cfg.attach(&endBB->cfg, Graph::Edge::TREE);
+         mkOp1(OP_MOV, TYPE_U32, res, op1);
+         mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+         setPosition(endBB, true);
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, { res }, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
    }
 
    _debug_printf("Unsupported OpenCLLIB opcode %u\n", op);
