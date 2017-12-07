@@ -3364,6 +3364,12 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
    };
 
    switch (op) {
+   case OpenCLLIB::Prefetch:
+      {
+         _debug_printf("Unsupported OpenCLLIB opcode %u\n", op);
+         return SPV_SUCCESS;
+      }
+      break;
    case OpenCLLIB::SMad24:
    case OpenCLLIB::UMad24:
       {
