@@ -1726,6 +1726,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          case SPV_EXT_INST_TYPE_OPENCL_STD:
             return convertOpenCLInstruction(id, type, static_cast<OpenCLLIB::Entrypoints>(extensionOpcode), parsedInstruction);
          default:
+            _debug_printf("Unsupported SPV_EXT_INST_TYPE %u\n", parsedInstruction->ext_inst_type);
             return SPV_UNSUPPORTED;
          }
       }
@@ -3377,6 +3378,7 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
       break;
    }
 
+   _debug_printf("Unsupported OpenCLLIB opcode %u\n", op);
    return SPV_UNSUPPORTED;
 }
 
