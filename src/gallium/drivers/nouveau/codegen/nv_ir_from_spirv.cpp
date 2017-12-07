@@ -3376,6 +3376,22 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::SHadd:
+   case OpenCLLIB::UHadd:
+      {
+         auto op1 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 4u), 0u);
+         auto op2 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 5u), 0u);
+         auto res = getScratch();
+         DataType dType = type->getEnumType(op == OpenCLLIB::SHadd);
+
+         mkOp2(OP_ADD, dType, res, op1, op2);
+         mkOp3(OP_MAD, dType, res, res, loadImm(getScratch(), 2), res)->subOp = NV50_IR_SUBOP_MUL_HIGH;
+         mkOp2(OP_SHR, dType, res, res, loadImm(getScratch(), 1));
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, { res }, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
    case OpenCLLIB::Nextafter:
       {
          // TODO: fix nextafter(0, -1)
