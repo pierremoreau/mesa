@@ -3410,6 +3410,67 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::Nextafter:
+      {
+         // TODO: fix nextafter(0, -1)
+         auto op1 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 4u), 0u);
+         auto op2 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 5u), 0u);
+         auto tmp = getScratch();
+         auto res = getScratch();
+         auto pred = getScratch(1, FILE_PREDICATE);
+
+         mkCmp(OP_SLCT, CC_GE, TYPE_S32, tmp, TYPE_F32, loadImm(getScratch(), 1), loadImm(getScratch(), -1), op1);
+
+         BasicBlock *tBB = new BasicBlock(func);
+         BasicBlock *fBB = new BasicBlock(func);
+         BasicBlock *endBB = new BasicBlock(func);
+
+         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+         bb->cfg.attach(&tBB->cfg, Graph::Edge::TREE);
+         mkCmp(OP_SET, CC_GT, TYPE_U8, pred, TYPE_F32, op2, op1);
+         mkFlow(OP_BRA, tBB, CC_P, pred);
+
+         setPosition(fBB, true);
+         fBB = new BasicBlock(func);
+         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+         mkFlow(OP_BRA, fBB, CC_ALWAYS, nullptr);
+
+         setPosition(tBB, true);
+         mkOp2(OP_ADD, TYPE_S32, res, op1, tmp);
+         tBB->cfg.attach(&endBB->cfg, Graph::Edge::FORWARD);
+         mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+         setPosition(fBB, true);
+
+         tBB = new BasicBlock(func);
+         fBB = new BasicBlock(func);
+
+         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+         bb->cfg.attach(&tBB->cfg, Graph::Edge::TREE);
+         mkCmp(OP_SET, CC_LT, TYPE_U8, pred, TYPE_F32, op2, op1);
+         mkFlow(OP_BRA, tBB, CC_P, pred);
+
+         setPosition(fBB, true);
+         fBB = new BasicBlock(func);
+         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+         mkFlow(OP_BRA, fBB, CC_ALWAYS, nullptr);
+
+         setPosition(tBB, true);
+         mkOp2(OP_SUB, TYPE_S32, res, op1, tmp);
+         tBB->cfg.attach(&endBB->cfg, Graph::Edge::FORWARD);
+         mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+         setPosition(fBB, true);
+         bb->cfg.attach(&endBB->cfg, Graph::Edge::TREE);
+         mkOp1(OP_MOV, TYPE_U32, res, op1);
+         mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+         setPosition(endBB, true);
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, { res }, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
    case OpenCLLIB::Degrees:
    case OpenCLLIB::Radians:
       {
@@ -3424,6 +3485,29 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
                mkOp2(OP_MUL, dType, res, op1, loadImm(getScratch(8), op == OpenCLLIB::Degrees ? 0x404ca5dc1a63c1f8LU : 0x3f91df46a2529d39LU));
             else
                mkOp2(OP_MUL, dType, res, op1, loadImm(getScratch(), op == OpenCLLIB::Degrees ? 0x42652ee1 : 0x3c8efa35));
+
+            values.push_back(res);
+         }
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, values, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
+   case OpenCLLIB::Mix:
+      {
+         spv::Id src0Id = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
+         spv::Id src1Id = spirv::getOperand<spv::Id>(parsedInstruction, 5u);
+         spv::Id src2Id = spirv::getOperand<spv::Id>(parsedInstruction, 6u);
+         std::vector<PValue> values;
+         for (int i = 0; i < spvValues.find(src0Id)->second.value.size(); ++i) {
+            auto op1 = getOp(src0Id, i);
+            auto op2 = getOp(src1Id, i);
+            auto op3 = getOp(src2Id, i);
+            DataType dType = type->getElementEnumType(i);
+            auto res = getScratch(dType == TYPE_F64 ? 8 : 4);
+
+            mkOp2(OP_SUB, dType, res, op2, op1);
+            mkOp2(OP_MUL, dType, res, res, op3);
+            mkOp2(OP_ADD, dType, res, res, op1);
 
             values.push_back(res);
          }
@@ -3510,29 +3594,6 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
-   case OpenCLLIB::Mix:
-      {
-         spv::Id src0Id = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
-         spv::Id src1Id = spirv::getOperand<spv::Id>(parsedInstruction, 5u);
-         spv::Id src2Id = spirv::getOperand<spv::Id>(parsedInstruction, 6u);
-         std::vector<PValue> values;
-         for (int i = 0; i < spvValues.find(src0Id)->second.value.size(); ++i) {
-            auto op1 = getOp(src0Id, i);
-            auto op2 = getOp(src1Id, i);
-            auto op3 = getOp(src2Id, i);
-            DataType dType = type->getElementEnumType(i);
-            auto res = getScratch(dType == TYPE_F64 ? 8 : 4);
-
-            mkOp2(OP_SUB, dType, res, op2, op1);
-            mkOp2(OP_MUL, dType, res, res, op3);
-            mkOp2(OP_ADD, dType, res, res, op1);
-
-            values.push_back(res);
-         }
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, values, type->getPaddings() });
-         return SPV_SUCCESS;
-      }
-      break;
    case OpenCLLIB::Sign:
       {
          spv::Id srcId = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
@@ -3606,18 +3667,6 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
-   case OpenCLLIB::SMad24:
-   case OpenCLLIB::UMad24:
-      {
-         auto op1 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 4u), 0u);
-         auto op2 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 5u), 0u);
-         auto op3 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 6u), 0u);
-         auto res = getScratch();
-         mkMAD24(res, type->getEnumType(op == OpenCLLIB::SMad24), op1, op2, op3);
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, { res }, type->getPaddings() });
-         return SPV_SUCCESS;
-      }
-      break;
    case OpenCLLIB::SHadd:
    case OpenCLLIB::UHadd:
       {
@@ -3634,63 +3683,14 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
-   case OpenCLLIB::Nextafter:
+   case OpenCLLIB::SMad24:
+   case OpenCLLIB::UMad24:
       {
-         // TODO: fix nextafter(0, -1)
          auto op1 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 4u), 0u);
          auto op2 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 5u), 0u);
-         auto tmp = getScratch();
+         auto op3 = getOp(spirv::getOperand<spv::Id>(parsedInstruction, 6u), 0u);
          auto res = getScratch();
-         auto pred = getScratch(1, FILE_PREDICATE);
-
-         mkCmp(OP_SLCT, CC_GE, TYPE_S32, tmp, TYPE_F32, loadImm(getScratch(), 1), loadImm(getScratch(), -1), op1);
-
-         BasicBlock *tBB = new BasicBlock(func);
-         BasicBlock *fBB = new BasicBlock(func);
-         BasicBlock *endBB = new BasicBlock(func);
-
-         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
-         bb->cfg.attach(&tBB->cfg, Graph::Edge::TREE);
-         mkCmp(OP_SET, CC_GT, TYPE_U8, pred, TYPE_F32, op2, op1);
-         mkFlow(OP_BRA, tBB, CC_P, pred);
-
-         setPosition(fBB, true);
-         fBB = new BasicBlock(func);
-         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
-         mkFlow(OP_BRA, fBB, CC_ALWAYS, nullptr);
-
-         setPosition(tBB, true);
-         mkOp2(OP_ADD, TYPE_S32, res, op1, tmp);
-         tBB->cfg.attach(&endBB->cfg, Graph::Edge::FORWARD);
-         mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
-
-         setPosition(fBB, true);
-
-         tBB = new BasicBlock(func);
-         fBB = new BasicBlock(func);
-
-         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
-         bb->cfg.attach(&tBB->cfg, Graph::Edge::TREE);
-         mkCmp(OP_SET, CC_LT, TYPE_U8, pred, TYPE_F32, op2, op1);
-         mkFlow(OP_BRA, tBB, CC_P, pred);
-
-         setPosition(fBB, true);
-         fBB = new BasicBlock(func);
-         bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
-         mkFlow(OP_BRA, fBB, CC_ALWAYS, nullptr);
-
-         setPosition(tBB, true);
-         mkOp2(OP_SUB, TYPE_S32, res, op1, tmp);
-         tBB->cfg.attach(&endBB->cfg, Graph::Edge::FORWARD);
-         mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
-
-         setPosition(fBB, true);
-         bb->cfg.attach(&endBB->cfg, Graph::Edge::TREE);
-         mkOp1(OP_MOV, TYPE_U32, res, op1);
-         mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
-
-         setPosition(endBB, true);
-
+         mkMAD24(res, type->getEnumType(op == OpenCLLIB::SMad24), op1, op2, op3);
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, { res }, type->getPaddings() });
          return SPV_SUCCESS;
       }
