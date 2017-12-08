@@ -3462,6 +3462,41 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::Smoothstep:
+      {
+         spv::Id src0Id = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
+         spv::Id src1Id = spirv::getOperand<spv::Id>(parsedInstruction, 5u);
+         spv::Id src2Id = spirv::getOperand<spv::Id>(parsedInstruction, 6u);
+         std::vector<PValue> values;
+         for (int i = 0; i < spvValues.find(src0Id)->second.value.size(); ++i) {
+            auto op1 = getOp(src0Id, i);
+            auto op2 = getOp(src1Id, i);
+            auto op3 = getOp(src2Id, i);
+            DataType dType = type->getElementEnumType(i);
+            auto tmp0 = getScratch(dType == TYPE_F64 ? 8 : 4);
+            auto tmp1 = getScratch(dType == TYPE_F64 ? 8 : 4);
+            auto res = getScratch(dType == TYPE_F64 ? 8 : 4);
+
+            mkOp2(OP_SUB, dType, tmp0, op3, op1);
+            mkOp2(OP_SUB, dType, tmp1, op2, op1);
+            mkOp2(OP_DIV, dType, tmp0, tmp0, tmp1);
+            mkOp1(OP_SAT, dType, tmp0, tmp0);
+            if (dType == TYPE_F64) {
+               mkOp2(OP_MUL, dType, tmp1, tmp0, loadImm(getScratch(8), 2.0));
+               mkOp2(OP_SUB, dType, tmp1, loadImm(getScratch(8), 3.0), tmp1);
+            } else {
+               mkOp2(OP_MUL, dType, tmp1, tmp0, loadImm(getScratch(), 2.0f));
+               mkOp2(OP_SUB, dType, tmp1, loadImm(getScratch(), 3.0f), tmp1);
+            }
+            mkOp2(OP_MUL, dType, tmp1, tmp1, tmp0);
+            mkOp2(OP_MUL, dType, res, tmp1, tmp0);
+
+            values.push_back(res);
+         }
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, values, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
    case OpenCLLIB::Mix:
       {
          spv::Id src0Id = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
