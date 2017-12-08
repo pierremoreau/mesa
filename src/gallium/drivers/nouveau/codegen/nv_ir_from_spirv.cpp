@@ -3418,6 +3418,50 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::Step:
+      {
+         spv::Id src0Id = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
+         spv::Id src1Id = spirv::getOperand<spv::Id>(parsedInstruction, 5u);
+         std::vector<PValue> values;
+         for (int i = 0; i < spvValues.find(src0Id)->second.value.size(); ++i) {
+            auto op1 = getOp(src0Id, i);
+            auto op2 = getOp(src1Id, i);
+            DataType dType = type->getElementEnumType(i);
+            auto res = getScratch(dType == TYPE_F64 ? 8 : 4);
+            auto pred = getScratch(1, FILE_PREDICATE);
+
+            BasicBlock *tBB = new BasicBlock(func);
+            BasicBlock *fBB = new BasicBlock(func);
+            BasicBlock *endBB = new BasicBlock(func);
+
+            bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+            bb->cfg.attach(&tBB->cfg, Graph::Edge::TREE);
+            mkCmp(OP_SET, CC_LT, TYPE_U8, pred, dType, op2, op1);
+            mkFlow(OP_BRA, tBB, CC_P, pred);
+
+            setPosition(tBB, true);
+            bb->cfg.attach(&endBB->cfg, Graph::Edge::FORWARD);
+            if (dType == TYPE_F64)
+               mkMov(res, loadImm(getScratch(8), 0x0000000000000000UL), dType);
+            else
+               mkMov(res, loadImm(getScratch(), 0x00000000), dType);
+            mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+            setPosition(fBB, true);
+            bb->cfg.attach(&endBB->cfg, Graph::Edge::TREE);
+            if (dType == TYPE_F64)
+               mkMov(res, loadImm(getScratch(8), 0x3ff0000000000000UL), dType);
+            else
+               mkMov(res, loadImm(getScratch(), 0x3f800000), dType);
+            mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+            setPosition(endBB, true);
+            values.push_back(res);
+         }
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, values, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
    case OpenCLLIB::Mix:
       {
          spv::Id src0Id = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
