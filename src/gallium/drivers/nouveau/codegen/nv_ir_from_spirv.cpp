@@ -3418,6 +3418,29 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::Mix:
+      {
+         spv::Id src0Id = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
+         spv::Id src1Id = spirv::getOperand<spv::Id>(parsedInstruction, 5u);
+         spv::Id src2Id = spirv::getOperand<spv::Id>(parsedInstruction, 6u);
+         std::vector<PValue> values;
+         for (int i = 0; i < spvValues.find(src0Id)->second.value.size(); ++i) {
+            auto op1 = getOp(src0Id, i);
+            auto op2 = getOp(src1Id, i);
+            auto op3 = getOp(src2Id, i);
+            DataType dType = type->getElementEnumType(i);
+            auto res = getScratch(dType == TYPE_F64 ? 8 : 4);
+
+            mkOp2(OP_SUB, dType, res, op2, op1);
+            mkOp2(OP_MUL, dType, res, res, op3);
+            mkOp2(OP_ADD, dType, res, res, op1);
+
+            values.push_back(res);
+         }
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, values, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
    case OpenCLLIB::Sign:
       {
          spv::Id srcId = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
