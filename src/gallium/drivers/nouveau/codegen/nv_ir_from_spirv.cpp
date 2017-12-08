@@ -3761,6 +3761,38 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::Bitselect:
+      {
+         spv::Id src0Id = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
+         spv::Id src1Id = spirv::getOperand<spv::Id>(parsedInstruction, 5u);
+         spv::Id src2Id = spirv::getOperand<spv::Id>(parsedInstruction, 6u);
+         std::vector<PValue> values;
+         for (int i = 0; i < spvValues.find(src0Id)->second.value.size(); ++i) {
+            auto op1 = getOp(src0Id, i);
+            auto op2 = getOp(src1Id, i);
+            auto op3 = getOp(src2Id, i);
+            unsigned int dTypeSize = typeSizeof(type->getElementEnumType(i));
+            DataType oriDType = typeOfSize(dTypeSize), dType;
+            auto res = getScratch(std::max(4u, dTypeSize));
+
+            if (dTypeSize < 8)
+               dType = TYPE_U32;
+            else
+               dType = TYPE_U64;
+
+            auto tmp = getScratch(typeSizeof(dType));
+
+            mkOp1(OP_NOT, dType, tmp, op3);
+            mkOp2(OP_AND, dType, res, tmp, op1);
+            mkOp2(OP_AND, dType, tmp, op2, op3);
+            mkOp2(OP_OR, dType, res, res, tmp);
+
+            values.push_back(res);
+         }
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, values, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
    }
 
    _debug_printf("Unsupported OpenCLLIB opcode %u\n", op);
