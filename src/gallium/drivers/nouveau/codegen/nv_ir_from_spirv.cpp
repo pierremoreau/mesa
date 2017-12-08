@@ -3553,6 +3553,27 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::Vloadn:
+      {
+         std::vector<PValue> values;
+         for (int i = 0; i < type->getElementsNb(); ++i) {
+            DataType dType = typeOfSize(typeSizeof(type->getElementEnumType(i)));
+            auto res = getScratch(std::max(4u, typeSizeof(dType)));
+            loadImm(res, 0);
+            values.push_back(res);
+         }
+
+         _debug_printf("Unsupported OpenCLLIB opcode %u\n", op);
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, values, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
+   case OpenCLLIB::Vstoren:
+      {
+         _debug_printf("Unsupported OpenCLLIB opcode %u\n", op);
+         return SPV_SUCCESS;
+      }
+      break;
    }
 
    _debug_printf("Unsupported OpenCLLIB opcode %u\n", op);
