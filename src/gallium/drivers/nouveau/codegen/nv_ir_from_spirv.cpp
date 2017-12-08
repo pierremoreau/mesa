@@ -3370,6 +3370,79 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::Sign:
+      {
+         spv::Id srcId = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
+         std::vector<PValue> values;
+         // +1.0 for x > 0
+         // -1.0 for x < 0
+         // +0.0 for x == inf
+         // -0.0 for x == -inf
+         //  0.0 for x == NaN
+         for (int i = 0; i < spvValues.find(srcId)->second.value.size(); ++i) {
+            auto op1 = getOp(srcId, i);
+            DataType dType = type->getElementEnumType(i);
+            auto res = getScratch(dType == TYPE_F64 ? 8 : 4);
+            auto pred = getScratch(1, FILE_PREDICATE);
+
+            BasicBlock *tBB = new BasicBlock(func);
+            BasicBlock *fBB = new BasicBlock(func);
+            BasicBlock *endBB = new BasicBlock(func);
+
+            bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+            bb->cfg.attach(&tBB->cfg, Graph::Edge::TREE);
+            // NaN needs special handling
+            if (dType == TYPE_F64) {
+               mkOp2(OP_AND, TYPE_U64, res, op1, loadImm(getScratch(8), 0x7fffffffffffffffUL));
+               mkCmp(OP_SET, CC_EQ, TYPE_U8, pred, TYPE_U64, res, loadImm(getScratch(8), 0x7ff0000000000000UL));
+            } else {
+               mkOp2(OP_AND, TYPE_U32, res, op1, loadImm(getScratch(), 0x7fffffff));
+               mkCmp(OP_SET, CC_EQ, TYPE_U8, pred, TYPE_U32, res, loadImm(getScratch(), 0x7f800000));
+            }
+            mkFlow(OP_BRA, tBB, CC_P, pred);
+
+            setPosition(tBB, true);
+            bb->cfg.attach(&endBB->cfg, Graph::Edge::FORWARD);
+            mkMov(res, op1, dType);
+            mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+            setPosition(fBB, true);
+            tBB = new BasicBlock(func);
+            fBB = new BasicBlock(func);
+            bb->cfg.attach(&fBB->cfg, Graph::Edge::TREE);
+            bb->cfg.attach(&tBB->cfg, Graph::Edge::TREE);
+            if (dType == TYPE_F64)
+               mkCmp(OP_SET, CC_GT, TYPE_U8, pred, TYPE_U64, res, loadImm(getScratch(8), 0x7ff0000000000000UL));
+            else
+               mkCmp(OP_SET, CC_GT, TYPE_U8, pred, TYPE_U32, res, loadImm(getScratch(), 0x7f800000));
+            mkFlow(OP_BRA, tBB, CC_P, pred);
+
+            setPosition(tBB, true);
+            bb->cfg.attach(&endBB->cfg, Graph::Edge::CROSS);
+            if (dType == TYPE_F64)
+               loadImm(res, 0.);
+            else
+               loadImm(res, 0.f);
+            mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+            setPosition(fBB, true);
+            bb->cfg.attach(&endBB->cfg, Graph::Edge::TREE);
+            if (dType == TYPE_F64) {
+               mkOp2(OP_AND, TYPE_U64, res, op1, loadImm(getScratch(8), 0x8000000000000000UL));
+               mkOp2(OP_OR, TYPE_U64, res, res, loadImm(getScratch(8), 0x3ff0000000000000UL));
+            } else {
+               mkOp2(OP_AND, TYPE_U32, res, op1, loadImm(getScratch(), 0x80000000));
+               mkOp2(OP_OR, TYPE_U32, res, res, loadImm(getScratch(), 0x3f800000));
+            }
+            mkFlow(OP_BRA, endBB, CC_ALWAYS, nullptr);
+
+            setPosition(endBB, true);
+            values.push_back(res);
+         }
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, values, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
    case OpenCLLIB::SMad24:
    case OpenCLLIB::UMad24:
       {
