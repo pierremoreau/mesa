@@ -3170,8 +3170,11 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          values.reserve(resType->getElementsNb());
 
          for (unsigned int i = 0u; i < resType->getElementsNb(); ++i) {
+            DataType sType = op.type->getElementEnumType(i);
+            unsigned int sTypeSize = typeSizeof(sType);
+            DataType siType = typeOfSize(sTypeSize, false, false);
             Value *src = op.getValue(this, i);
-            Value *tmp = getScratch(4);
+            Value *tmp = getScratch(sTypeSize);
             Value *pred = getScratch(1, FILE_PREDICATE);
 
             CondCode cc;
@@ -3188,11 +3191,20 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
                break;
             }
 
-            mkOp2(OP_AND, TYPE_U32, tmp, src, loadImm(getScratch(4), 0x7fffffff));
-            mkCmp(OP_SET, cc, TYPE_U32, pred, TYPE_U32, tmp, loadImm(getScratch(4), 0x7f800000));
-            if (opcode == spv::Op::OpIsNormal) {
-               mkCmp(OP_SET_AND, CC_GE, TYPE_U32, pred, TYPE_U32, tmp, loadImm(getScratch(4), 0x00800000), pred);
-               mkCmp(OP_SET_OR, CC_EQ, TYPE_U32, pred, TYPE_U32, tmp, loadImm(getScratch(4), 0x0), pred);
+            if (sType == TYPE_F64) {
+               mkOp2(OP_AND, siType, tmp, src, loadImm(getScratch(sTypeSize), 0x7fffffffffffffffUL));
+               mkCmp(OP_SET, cc, siType, pred, siType, tmp, loadImm(getScratch(sTypeSize), 0x7ff0000000000000UL));
+               if (opcode == spv::Op::OpIsNormal) {
+                  mkCmp(OP_SET_AND, CC_GE, siType, pred, siType, tmp, loadImm(getScratch(sTypeSize), 0x0010000000000000UL), pred);
+                  mkCmp(OP_SET_OR, CC_EQ, siType, pred, siType, tmp, loadImm(getScratch(sTypeSize), 0x0UL), pred);
+               }
+            } else {
+               mkOp2(OP_AND, siType, tmp, src, loadImm(getScratch(sTypeSize), 0x7fffffff));
+               mkCmp(OP_SET, cc, siType, pred, siType, tmp, loadImm(getScratch(sTypeSize), 0x7f800000));
+               if (opcode == spv::Op::OpIsNormal) {
+                  mkCmp(OP_SET_AND, CC_GE, siType, pred, siType, tmp, loadImm(getScratch(sTypeSize), 0x00800000), pred);
+                  mkCmp(OP_SET_OR, CC_EQ, siType, pred, siType, tmp, loadImm(getScratch(sTypeSize), 0x0), pred);
+               }
             }
             values.emplace_back(pred);
          }
