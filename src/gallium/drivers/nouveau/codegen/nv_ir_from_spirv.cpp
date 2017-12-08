@@ -2987,8 +2987,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 
             Value *src = componentIndex < op1ElemNb ? op1.value[componentIndex].value
                                                     : op2.value[componentIndex - op1ElemNb].value;
-            Value *dst = getScratch(typeOfSize(std::max(static_cast<uint8_t>(4u), src->reg.size)));
-            mkMov(dst, src, typeOfSize(std::max(4u, typeSizeof(src->reg.type))));
+            auto regSize = std::max(static_cast<uint8_t>(4u), src->reg.size);
+            Value *dst = getScratch(regSize);
+            mkMov(dst, src, typeOfSize(regSize));
             values.emplace_back(dst);
          }
 
@@ -3322,7 +3323,7 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
       {
          std::vector<PValue> values = { vec3Func(0u), vec3Func(1u), vec3Func(2u) };
          for (PValue &value : values) {
-            const DataType builtinEnum = value.value->reg.type;
+            const DataType builtinEnum = TYPE_U32;
             if (builtinEnum == typeEnum)
                continue;
             Value *res = getScratch(typeSize);
