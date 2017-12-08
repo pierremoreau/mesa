@@ -3297,8 +3297,12 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
    switch (builtin) {
    case spv::BuiltIn::WorkDim:
       vec3Func = [getSysVal,this](unsigned int index){ return getSysVal(SV_WORK_DIM, index); };
+      break;
    case spv::BuiltIn::LocalInvocationId:
       vec3Func = [getSysVal,this](unsigned int index){ return getSysVal(SV_TID, index); };
+      break;
+   case spv::BuiltIn::NumWorkgroups:
+      vec3Func = [getSysVal,this](unsigned int index){ return getSysVal(SV_NCTAID, index); };
       break;
    case spv::BuiltIn::WorkgroupSize:
       vec3Func = [getSysVal,this](unsigned int index){ return getSysVal(SV_NTID, index); };
@@ -3328,6 +3332,7 @@ Converter::loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiter
    switch (builtin) {
    case spv::BuiltIn::WorkDim:
    case spv::BuiltIn::LocalInvocationId:
+   case spv::BuiltIn::NumWorkgroups:
    case spv::BuiltIn::WorkgroupSize:
    case spv::BuiltIn::WorkgroupId:
    case spv::BuiltIn::GlobalInvocationId:
