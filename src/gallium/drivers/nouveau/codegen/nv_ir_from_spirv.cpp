@@ -3370,6 +3370,33 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::Fmax:
+   case OpenCLLIB::Fmin:
+      {
+         operation opcode;
+         switch (op) {
+         case OpenCLLIB::Fmax: opcode = OP_MAX; break;
+         case OpenCLLIB::Fmin: opcode = OP_MIN; break;
+         }
+
+         spv::Id src0Id = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
+         spv::Id src1Id = spirv::getOperand<spv::Id>(parsedInstruction, 5u);
+         std::vector<PValue> values;
+         for (int i = 0; i < spvValues.find(src0Id)->second.value.size(); ++i) {
+            auto op1 = getOp(src0Id, i);
+            auto op2 = getOp(src1Id, i);
+            DataType dType = type->getElementEnumType(i);
+            auto res = getScratch(dType == TYPE_F64 ? 8 : 4);
+
+            mkOp2(opcode, dType, res, op1, op2);
+
+            values.push_back(res);
+         }
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, values, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
    case OpenCLLIB::Degrees:
    case OpenCLLIB::Radians:
       {
