@@ -3683,6 +3683,51 @@ Converter::convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::
          return SPV_SUCCESS;
       }
       break;
+   case OpenCLLIB::Rotate:
+      {
+         spv::Id src0Id = spirv::getOperand<spv::Id>(parsedInstruction, 4u);
+         spv::Id src1Id = spirv::getOperand<spv::Id>(parsedInstruction, 5u);
+         std::vector<PValue> values;
+         for (int i = 0; i < spvValues.find(src0Id)->second.value.size(); ++i) {
+            auto op1 = getOp(src0Id, i);
+            auto op2 = getOp(src1Id, i);
+            unsigned int dTypeSize = typeSizeof(type->getElementEnumType(i));
+            DataType oriDType = typeOfSize(dTypeSize), dType;
+            auto res = getScratch(std::max(4u, dTypeSize));
+
+            if (dTypeSize < 8)
+               dType = TYPE_U32;
+            else {
+               _debug_printf("OpenCLLIB::Rotate is broken for TYPE_U64\n");
+               dType = TYPE_U64;
+            }
+
+            auto tmp0 = getScratch(typeSizeof(dType));
+            auto tmp1 = getScratch(typeSizeof(dType));
+
+            if (dTypeSize > 4)
+               mkOp2(OP_AND, dType, tmp0, op2, loadImm(getScratch(typeSizeof(dType)), (uint64_t)dTypeSize * 8 - 1));
+            else
+               mkOp2(OP_AND, dType, tmp0, op2, loadImm(getScratch(typeSizeof(dType)), dTypeSize * 8 - 1));
+            mkOp2(OP_SHL, dType, tmp1, op1, tmp0);
+
+            if (dTypeSize > 4)
+               mkOp2(OP_SUB, dType, tmp0, loadImm(getScratch(typeSizeof(dType)), (uint64_t)dTypeSize * 8), tmp0);
+            else
+               mkOp2(OP_SUB, dType, tmp0, loadImm(getScratch(typeSizeof(dType)), dTypeSize * 8), tmp0);
+            mkOp2(OP_SHR, dType, tmp0, op1, tmp0);
+            mkOp2(OP_OR, dType, tmp0, tmp0, tmp1);
+            if (dTypeSize > 4)
+               mkOp2(OP_AND, dType, res, tmp0, loadImm(getScratch(typeSizeof(dType)), (uint64_t)-1l));
+            else
+               mkOp2(OP_AND, dType, res, tmp0, loadImm(getScratch(typeSizeof(dType)), -1));
+
+            values.push_back(res);
+         }
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, type, values, type->getPaddings() });
+         return SPV_SUCCESS;
+      }
+      break;
    case OpenCLLIB::SMad24:
    case OpenCLLIB::UMad24:
       {
