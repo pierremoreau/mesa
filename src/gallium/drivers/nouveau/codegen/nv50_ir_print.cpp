@@ -732,13 +732,6 @@ PrintPass::visit(Function *fn)
 bool
 PrintPass::visit(BasicBlock *bb)
 {
-#if 0
-   INFO("---\n");
-   for (Graph::EdgeIterator ei = bb->cfg.incident(); !ei.end(); ei.next())
-      INFO(" <- BB:%i (%s)\n",
-           BasicBlock::get(ei.getNode())->getId(),
-           ei.getEdge()->typeStr());
-#endif
    INFO("BB:%i (%u instructions) - ", bb->getId(), bb->getInsnCount());
 
    if (bb->idom())
@@ -749,6 +742,11 @@ PrintPass::visit(BasicBlock *bb)
       INFO("BB:%i ", BasicBlock::get(df)->getId());
 
    INFO("}\n");
+
+   for (Graph::EdgeIterator ei = bb->cfg.incident(); !ei.end(); ei.next())
+      INFO(" <- BB:%i (%s)\n",
+           BasicBlock::get(ei.getNode())->getId(),
+           ei.getEdge()->typeStr());
 
    for (Graph::EdgeIterator ei = bb->cfg.outgoing(); !ei.end(); ei.next())
       INFO(" -> BB:%i (%s)\n",
