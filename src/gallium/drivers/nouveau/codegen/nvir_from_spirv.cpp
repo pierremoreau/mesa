@@ -34,7 +34,7 @@
 #include "codegen/nv50_ir_build_util.h"
 
 #include "OpenCL.std.h"
-#include "spirv.hpp11"
+#include "gallium/state_trackers/clover/spirv/spirv.hpp"
 
 namespace spirv {
 

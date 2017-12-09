@@ -130,6 +130,7 @@ files_libnouveau = files(
   'codegen/nv50_ir_driver.h',
   'codegen/nv50_ir_emit_nv50.cpp',
   'codegen/nv50_ir_from_tgsi.cpp',
+  'codegen/nvir_from_spirv.cpp',
   'codegen/nv50_ir_graph.cpp',
   'codegen/nv50_ir_graph.h',
   'codegen/nv50_ir.h',
@@ -212,7 +213,7 @@ libnouveau = static_library(
   ],
   c_args : [c_vis_args],
   cpp_args : [cpp_vis_args],
-  dependencies : [dep_libdrm, dep_libdrm_nouveau],
+  dependencies : [dep_libdrm, dep_libdrm_nouveau, dep_spirv_tools],
 )
 
 nouveau_compiler = executable(
