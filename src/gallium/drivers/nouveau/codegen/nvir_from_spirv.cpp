@@ -2174,6 +2174,8 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          } else {
             mkFlow(OP_BRA, searchLabel->second, CC_ALWAYS, nullptr);
             bb->cfg.attach(&searchLabel->second->cfg, Graph::Edge::BACK);
+            // XXX We have a loop?
+            func->loopNestingBound++;
          }
       }
       break;
