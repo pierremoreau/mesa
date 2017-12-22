@@ -461,6 +461,7 @@ private:
    std::unordered_map<SpirvFile, Symbol *> baseSymbols;
    spv::Id currentFuncId;
    uint32_t inputOffset; // XXX maybe better to have a separate DataArray for input, keeping track
+   bool matchPrevious = false;
 
    std::unordered_map<spv::Id, std::vector<FlowInstruction*>> branchesToMatch;
    std::unordered_map<spv::Id, std::vector<FunctionData>> functionsToMatch;
@@ -2121,8 +2122,14 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       {
          // A BB is created on function creation to store loads of arguments,
          // so only create one if this is not the first BB of the function.
-         if (!blocks.empty())
-            setPosition(new BasicBlock(func), true);
+         BasicBlock *newBB = (!blocks.empty()) ? new BasicBlock(func) : bb;
+
+         if (matchPrevious) {
+            bb->cfg.attach(&newBB->cfg, Graph::Edge::TREE);
+            matchPrevious = false;
+         }
+
+         setPosition(newBB, true);
 
          const spv::Id id = parsedInstruction->result_id;
          blocks.emplace(id, bb);
@@ -2185,34 +2192,28 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const spv::Id ifId = getIdOfOperand(1u);
          const spv::Id elseId = getIdOfOperand(2u);
 
-         auto searchIf = blocks.find(ifId);
-         if (searchIf == blocks.end()) {
-            auto flow = mkFlow(OP_BRA, nullptr, CC_P, pred);
-            auto searchFlow = branchesToMatch.find(ifId);
-            if (searchFlow == branchesToMatch.end())
-               branchesToMatch.emplace(ifId, std::vector<FlowInstruction*>{ flow });
-            else
-               searchFlow->second.push_back(flow);
-         } else {
-            mkFlow(OP_BRA, searchIf->second, CC_P, pred);
-            bb->cfg.attach(&searchIf->second->cfg, Graph::Edge::BACK);
-         }
-
-         auto tmp = new BasicBlock(func);
-         bb->cfg.attach(&tmp->cfg, Graph::Edge::TREE);
-         setPosition(tmp, true);
-
+         // XXX Assuming the if-block will always be the next one
          auto searchElse = blocks.find(elseId);
          if (searchElse == blocks.end()) {
-            auto flow = mkFlow(OP_BRA, nullptr, CC_ALWAYS, nullptr);
+            auto flow = mkFlow(OP_BRA, nullptr, CC_NOT_P, pred);
             auto searchFlow = branchesToMatch.find(elseId);
             if (searchFlow == branchesToMatch.end())
                branchesToMatch.emplace(elseId, std::vector<FlowInstruction*>{ flow });
             else
                searchFlow->second.push_back(flow);
          } else {
-            mkFlow(OP_BRA, searchElse->second, CC_ALWAYS, nullptr);
+            mkFlow(OP_BRA, searchElse->second, CC_NOT_P, pred);
             bb->cfg.attach(&searchElse->second->cfg, Graph::Edge::BACK);
+            // XXX We have a loop?
+            func->loopNestingBound++;
+         }
+
+         auto searchIf = blocks.find(ifId);
+         if (searchIf != blocks.end()) {
+            _debug_printf("Assumption failed! The if-block has already been met!\n");
+            return SPV_ERROR_INTERNAL;
+         } else {
+            matchPrevious = true;
          }
       }
       break;
