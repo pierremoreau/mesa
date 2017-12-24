@@ -477,7 +477,6 @@ public:
 
 private:
    virtual bool visit(BasicBlock *);
-   virtual bool visit(Function *);
    bool handlePhi(Instruction *);
 
    std::unordered_map<spv::Id, std::vector<std::pair<std::vector<Converter::PValue>, BasicBlock*>>>* phiNodes;
@@ -494,16 +493,11 @@ GetOutOfSSA::visit(BasicBlock *bb)
    Instruction *next;
    for (Instruction *i = bb->getPhi(); i && i != bb->getEntry(); i = next) {
       next = i->next;
-      if (!handlePhi(i))
+      if (!handlePhi(i)) {
+         err = true;
          return false;
+      }
    }
-   return true;
-}
-
-bool
-GetOutOfSSA::visit(Function *func)
-{
-   bld.setProgram(func->getProgram());
    return true;
 }
 
@@ -534,6 +528,10 @@ GetOutOfSSA::handlePhi(Instruction *insn)
          pairs.push_back(pair);
          break;
       }
+   }
+   if (pairs.size() != data.size()) {
+      _debug_printf("Missing phi pairs: only %llu pairs matched (out of %llu)\n", pairs.size(), data.size());
+      return false;
    }
    auto searchValue = spvValues->find(searchId->second);
    if (searchValue == spvValues->end()) {
@@ -1511,7 +1509,8 @@ Converter::run()
 
    GetOutOfSSA outOfSSAPass;
    outOfSSAPass.setData(&phiNodes, &phiMapping, &spvValues);
-   outOfSSAPass.run(prog, true, false);
+   if (!outOfSSAPass.run(prog, true, false))
+      return false;
 
    return true;
 }
