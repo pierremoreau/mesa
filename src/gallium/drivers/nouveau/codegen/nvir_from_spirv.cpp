@@ -516,30 +516,14 @@ GetOutOfSSA::handlePhi(Instruction *insn)
       return false;
    }
 
-   auto& data = searchData->second;
-   auto pairs = std::vector<std::pair<std::vector<Converter::PValue>, BasicBlock*>>();
-   pairs.reserve(data.size());
-   for (Graph::EdgeIterator it = insn->bb->cfg.incident(); !it.end(); it.next()) {
-      BasicBlock *obb = BasicBlock::get(it.getNode());
-      for (auto& pair : data) {
-         if (pair.second != obb)
-            continue;
-
-         pairs.push_back(pair);
-         break;
-      }
-   }
-   if (pairs.size() != data.size()) {
-      _debug_printf("Missing phi pairs: only %llu pairs matched (out of %llu)\n", pairs.size(), data.size());
-      return false;
-   }
+   const auto& data = searchData->second;
    auto searchValue = spvValues->find(searchId->second);
    if (searchValue == spvValues->end()) {
       _debug_printf("Couldn't find SpirVValue for phi node with id %u\n", searchId->second);
       return false;
    }
 
-   for (auto& pair : pairs) {
+   for (auto& pair : data) {
       if (pair.first.size() > 1u)
          _debug_printf("Multiple var for same phi node aren't really supported\n");
       auto bbExit = pair.second->getExit();
