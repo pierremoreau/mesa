@@ -1742,7 +1742,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       {
          const spv::Id entryPointId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          const spv::ExecutionMode executionMode = spirv::getOperand<spv::ExecutionMode>(parsedInstruction, 1u);
-         _debug_printf("Ignoring unsupported execution mode %u for entry point %u\n", entryPointId, executionMode);
+         _debug_printf("Ignoring unsupported execution mode %u for entry point %u\n", executionMode, entryPointId);
       }
       break;
    case spv::Op::OpName:
