@@ -57,7 +57,7 @@ T getOperand(const spv_parsed_instruction_t *parsedInstruction, uint16_t operand
 {
    assert(operandIndex < parsedInstruction->num_operands);
 
-   const spv_parsed_operand_t parsedOperand = parsedInstruction->operands[operandIndex];
+   const spv_parsed_operand_t& parsedOperand = parsedInstruction->operands[operandIndex];
    T value;
    std::memcpy(&value, parsedInstruction->words + parsedOperand.offset, parsedOperand.num_words * sizeof(word));
 
@@ -3275,11 +3275,11 @@ spv_result_t
 Converter::convertDecorate(const spv_parsed_instruction_t *parsedInstruction, bool hasMember)
 {
    assert(!hasMember);
-   unsigned int offset = static_cast<unsigned int>(hasMember);
+   const unsigned int offset = hasMember ? 1u : 0u;
 
    Words literals = Words();
-   for (unsigned int i = 2u + offset; i < parsedInstruction->num_operands; ++i)
-      literals.push_back(spirv::getOperand<unsigned>(parsedInstruction, i));
+   for (unsigned int i = 3u + offset; i < parsedInstruction->num_words; ++i)
+      literals.push_back(parsedInstruction->words[i]);
    decorations[spirv::getOperand<spv::Id>(parsedInstruction, 0u)][spirv::getOperand<spv::Decoration>(parsedInstruction, 1u + offset)].emplace_back(literals);
 
    return SPV_SUCCESS;
