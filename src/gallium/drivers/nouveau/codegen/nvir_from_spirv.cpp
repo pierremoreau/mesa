@@ -427,6 +427,7 @@ private:
    nv50_ir::CondCode convertCc(spv::Op op);
    spv_result_t loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiterals, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone);
    spv_result_t convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::Entrypoints op, const spv_parsed_instruction_t *parsedInstruction);
+   spv_result_t generateMemBarrier(spv::Scope memoryScope, spv::MemorySemanticsMask memorySemantics);
    int getSubOp(spv::Op opcode) const;
    static enum SpirvFile getStorageFile(spv::StorageClass storage);
    static unsigned int getFirstBasicElementSize(Type const* type);
@@ -1622,6 +1623,47 @@ Converter::convertCc(spv::Op op)
    default:
       return CC_NO;
    }
+}
+
+spv_result_t
+Converter::generateMemBarrier(spv::Scope memoryScope, spv::MemorySemanticsMask memorySemantics)
+{
+   const spv::MemorySemanticsMask semantics = static_cast<spv::MemorySemanticsMask>(static_cast<uint32_t>(memorySemantics) & 0x0000001e);
+   const spv::MemorySemanticsMask targets = static_cast<spv::MemorySemanticsMask>(static_cast<uint32_t>(memorySemantics)   & 0x00000fc0);
+
+   if (hasFlag(targets, spv::MemorySemanticsShift::UniformMemory) ||
+       hasFlag(targets, spv::MemorySemanticsShift::SubgroupMemory) ||
+       hasFlag(targets, spv::MemorySemanticsShift::CrossWorkgroupMemory) ||
+       hasFlag(targets, spv::MemorySemanticsShift::AtomicCounterMemory) ||
+       hasFlag(targets, spv::MemorySemanticsShift::ImageMemory)) {
+      _debug_printf("Only the workgroup memory semantics is currently supported.\n");
+      return SPV_ERROR_INVALID_BINARY;
+   }
+
+   if (semantics != spv::MemorySemanticsMask::MaskNone)
+      _debug_printf("MemBar semantics ignored: %02x\n", static_cast<uint32_t>(semantics));
+
+   Instruction *insn = mkOp(OP_MEMBAR, TYPE_NONE, nullptr);
+   insn->fixed = 1;
+   switch (memoryScope) {
+      case spv::Scope::Invocation:
+      _debug_printf("Invocation scope is not supported for MemoryBarrier.\n");
+      return SPV_UNSUPPORTED;
+   case spv::Scope::Subgroup:
+      _debug_printf("Subgroup scope is not supported for MemoryBarrier.\n");
+      return SPV_UNSUPPORTED;
+   case spv::Scope::Workgroup:
+      insn->subOp = NV50_IR_SUBOP_MEMBAR(M, CTA);
+      break;
+   case spv::Scope::Device:
+      insn->subOp = NV50_IR_SUBOP_MEMBAR(M, GL);
+      break;
+   case spv::Scope::CrossDevice:
+      insn->subOp = NV50_IR_SUBOP_MEMBAR(M, SYS);
+      break;
+   }
+
+   return SPV_SUCCESS;
 }
 
 spv_result_t
@@ -3024,26 +3066,46 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpControlBarrier:
       {
-         const ImmediateValue *scopeImm = getStructForOperand(0u).value.front().value->asImm();
-         const ImmediateValue *memoryImm = getStructForOperand(1u).value.front().value->asImm();
-         const ImmediateValue *memorySemanticsImm = getStructForOperand(2u).value.front().value->asImm();
+         const ImmediateValue *executionImm = getStructForOperand(0u).value.front().value->asImm();
+         const spv::Scope execution = static_cast<spv::Scope>(executionImm->reg.data.u32);
 
-         const spv::Scope scope = static_cast<spv::Scope>(scopeImm->reg.data.u32);
-         const spv::Scope memory = static_cast<spv::Scope>(memoryImm->reg.data.u32);
-         const uint32_t memorySemantics = memorySemanticsImm->reg.data.u32;
-
-         if (scope != spv::Scope::Workgroup || memory != spv::Scope::Workgroup) {
-            _debug_printf("Only workgroup scopes are currently supported.\n");
-            return SPV_ERROR_INVALID_BINARY;
-         }
-         if ((memorySemantics & static_cast<uint32_t>(spv::MemorySemanticsMask::WorkgroupMemory)) != memorySemantics) {
-            _debug_printf("Only the workgroup memory semantics is currently supported.\n");
+         if (execution != spv::Scope::Subgroup && execution != spv::Scope::Workgroup) {
+            _debug_printf("Only subgroup and workgroup scopes are currently supported.\n");
             return SPV_ERROR_INVALID_BINARY;
          }
 
          Instruction *insn = mkOp2(OP_BAR, TYPE_U32, nullptr, mkImm(0), mkImm(0));
          insn->fixed = 1u;
-         insn->subOp = NV50_IR_SUBOP_BAR_SYNC;
+         if (execution == spv::Scope::Subgroup)
+            insn->subOp = NV50_IR_SUBOP_BAR_ARRIVE;
+         else if (execution == spv::Scope::Workgroup)
+            insn->subOp = NV50_IR_SUBOP_BAR_SYNC;
+
+         info->numBarriers = 1u;
+
+         const ImmediateValue *memoryImm = getStructForOperand(1u).value.front().value->asImm();
+         const ImmediateValue *memorySemanticsImm = getStructForOperand(2u).value.front().value->asImm();
+         const spv::Scope memory = static_cast<spv::Scope>(memoryImm->reg.data.u32);
+         const spv::MemorySemanticsMask memorySemantics = static_cast<spv::MemorySemanticsMask>(memorySemanticsImm->reg.data.u32);
+
+         if (memorySemantics != spv::MemorySemanticsMask::MaskNone) {
+            const spv_result_t res = generateMemBarrier(memory, memorySemantics);
+            if (res != SPV_SUCCESS)
+               return res;
+         }
+      }
+      break;
+   case spv::Op::OpMemoryBarrier:
+      {
+         const ImmediateValue *memoryImm = getStructForOperand(0u).value.front().value->asImm();
+         const ImmediateValue *memorySemanticsImm = getStructForOperand(1u).value.front().value->asImm();
+
+         const spv::Scope memory = static_cast<spv::Scope>(memoryImm->reg.data.u32);
+         const spv::MemorySemanticsMask memorySemantics = static_cast<spv::MemorySemanticsMask>(memorySemanticsImm->reg.data.u32);
+
+         const spv_result_t res = generateMemBarrier(memory, memorySemantics);
+         if (res != SPV_SUCCESS)
+            return res;
       }
       break;
    case spv::Op::OpSampledImage:
