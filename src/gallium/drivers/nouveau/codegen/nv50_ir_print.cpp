@@ -240,6 +240,16 @@ static const char *barOpStr[] =
    "sync", "arrive", "red and", "red or", "red popc"
 };
 
+static const char *membarOpDirStr[] =
+{
+   "L", "S", "M"
+};
+
+static const char *membarOpScopeStr[] =
+{
+   "cta", "gl", "sys"
+};
+
 static const char *DataTypeStr[] =
 {
    "-",
@@ -624,6 +634,15 @@ void Instruction::print() const
          if (subOp < ARRAY_SIZE(barOpStr))
             PRINT("%s ", barOpStr[subOp]);
          break;
+      case OP_MEMBAR: {
+         const uint8_t dirOp = NV50_IR_SUBOP_MEMBAR_DIR(subOp) - 1u;
+         if (dirOp < ARRAY_SIZE(membarOpDirStr))
+            PRINT("%s ", membarOpDirStr[dirOp]);
+         const uint8_t scopeOp = NV50_IR_SUBOP_MEMBAR_SCOPE(subOp) >> 2;
+         if (scopeOp < ARRAY_SIZE(membarOpScopeStr))
+            PRINT("%s ", membarOpScopeStr[scopeOp]);
+         break;
+      }
       default:
          if (subOp)
             PRINT("(SUBOP:%u) ", subOp);
