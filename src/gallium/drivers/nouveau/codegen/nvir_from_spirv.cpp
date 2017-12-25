@@ -156,10 +156,10 @@ public:
    using Decorations = std::unordered_map<spv::Id, Decoration>;
     struct PValue {
       union { Value *value; Value *indirect; };
-      PValue() : value(nullptr), symbol(nullptr) {}
       Symbol *symbol;
+      PValue() : value(nullptr), symbol(nullptr) {}
       PValue(Value *value) : value(value), symbol(nullptr) {}
-      PValue(Symbol *symbol, Value *indirect) : symbol(symbol), indirect(indirect) {}
+      PValue(Symbol *symbol, Value *indirect) : indirect(indirect), symbol(symbol) {}
       bool isUndefined() const { return symbol == nullptr && value == nullptr; }
       bool isValue() const { return value != nullptr && (value->reg.file == FILE_GPR || value->reg.file == FILE_IMMEDIATE); }
    };
