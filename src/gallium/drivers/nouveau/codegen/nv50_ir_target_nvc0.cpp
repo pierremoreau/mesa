@@ -408,6 +408,11 @@ TargetNVC0::insnCanLoad(const Instruction *i, int s,
       }
    }
 
+   // only load supports 1-byte and 2-bytes aligned loads
+   if (i->op != OP_LOAD && typeSizeof(i->sType) < 4u &&
+       isMemoryFile(sf))
+      return false;
+
    return true;
 }
 
