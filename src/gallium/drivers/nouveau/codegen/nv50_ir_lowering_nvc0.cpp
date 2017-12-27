@@ -2854,6 +2854,9 @@ NVC0LoweringPass::handleCVT(Instruction *i)
       return true;
    }
 
+   if (typeSizeof(i->dType) < 8u && typeSizeof(i->sType) < 8u)
+      return true;
+
    if (i->saturate && (typeSizeof(i->sType) > typeSizeof(i->dType))) {
       if (isSignedIntType(i->sType) && !isSignedIntType(i->dType)) {
          // Signed to unsigned: only need to clamp to 0
