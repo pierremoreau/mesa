@@ -494,6 +494,7 @@ nve4_compute_upload_input(struct nvc0_context *nvc0,
    struct nvc0_screen *screen = nvc0->screen;
    struct nouveau_pushbuf *push = nvc0->base.pushbuf;
    struct nvc0_program *cp = nvc0->compprog;
+   const unsigned size = align(cp->parm_size, 0x4);
    uint64_t address;
 
    address = screen->uniform_bo->offset + NVC0_CB_AUX_INFO(5);
@@ -505,9 +506,9 @@ nve4_compute_upload_input(struct nvc0_context *nvc0,
       BEGIN_NVC0(push, NVE4_CP(UPLOAD_LINE_LENGTH_IN), 2);
       PUSH_DATA (push, cp->parm_size);
       PUSH_DATA (push, 0x1);
-      BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 1 + (cp->parm_size / 4));
+      BEGIN_1IC0(push, NVE4_CP(UPLOAD_EXEC), 1 + size / 4);
       PUSH_DATA (push, NVE4_COMPUTE_UPLOAD_EXEC_LINEAR | (0x20 << 1));
-      PUSH_DATAp(push, info->input, cp->parm_size / 4);
+      PUSH_DATAp(push, info->input, size / 4);
    }
    BEGIN_NVC0(push, NVE4_CP(UPLOAD_DST_ADDRESS_HIGH), 2);
    PUSH_DATAh(push, address + NVC0_CB_AUX_GRID_INFO(0));
