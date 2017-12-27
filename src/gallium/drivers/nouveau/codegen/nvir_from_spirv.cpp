@@ -3056,7 +3056,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
                if (src.value[i].indirect != nullptr)
                   mkOp2(OP_ADD, dstTy, res, res, src.value[i].indirect);
             } else {
-               mkCvt(OP_CVT, dstTy, res, srcTy, src.value[i].value)->saturate = saturate;
+               mkCvt(OP_CVT, dstTy, res, srcTy, src.getValue(this, i))->saturate = saturate;
             }
             values.emplace_back(res);
          }
