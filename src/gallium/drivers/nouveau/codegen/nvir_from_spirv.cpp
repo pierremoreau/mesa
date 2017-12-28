@@ -1633,7 +1633,6 @@ Converter::generateMemBarrier(spv::Scope memoryScope, spv::MemorySemanticsMask m
 
    if (hasFlag(targets, spv::MemorySemanticsShift::UniformMemory) ||
        hasFlag(targets, spv::MemorySemanticsShift::SubgroupMemory) ||
-       hasFlag(targets, spv::MemorySemanticsShift::CrossWorkgroupMemory) ||
        hasFlag(targets, spv::MemorySemanticsShift::AtomicCounterMemory) ||
        hasFlag(targets, spv::MemorySemanticsShift::ImageMemory)) {
       _debug_printf("Only the workgroup memory semantics is currently supported.\n");
