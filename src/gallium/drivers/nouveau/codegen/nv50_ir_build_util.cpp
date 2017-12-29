@@ -564,6 +564,7 @@ BuildUtil::split64BitOpPostRA(Function *fn, Instruction *i,
 {
    DataType hTy;
    int srcNr;
+   bool hasCarry = false;
 
    switch (i->dType) {
    case TYPE_U64: hTy = TYPE_U32; break;
@@ -585,6 +586,7 @@ BuildUtil::split64BitOpPostRA(Function *fn, Instruction *i,
       if (!carry)
          return NULL;
       srcNr = 2;
+      hasCarry = true;
       break;
    case OP_SELP: srcNr = 3; break;
    default:
@@ -630,7 +632,7 @@ BuildUtil::split64BitOpPostRA(Function *fn, Instruction *i,
          }
       }
    }
-   if (srcNr == 2) {
+   if (hasCarry) {
       lo->setFlagsDef(1, carry);
       hi->setFlagsSrc(hi->srcCount(), carry);
    }
