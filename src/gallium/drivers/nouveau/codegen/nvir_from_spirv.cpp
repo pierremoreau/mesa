@@ -2959,7 +2959,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const operation op = convertOp(opcode);
          const Type *elementType = resType->getElementsNb() == 1u ? resType : resType->getElementType(0u);
          int isSigned = 0;
-         if (opcode == spv::Op::OpShiftRightArithmetic && isSignedIntType(elementType->getEnumType()))
+         if (opcode == spv::Op::OpShiftRightArithmetic)
             isSigned = 1;
          const DataType dstTy = elementType->getEnumType(isSigned);
          const unsigned int elemByteSize = elementType->getSize();
