@@ -581,6 +581,11 @@ BuildUtil::split64BitOpPostRA(Function *fn, Instruction *i,
 
    switch (i->op) {
    case OP_MOV: srcNr = 1; break;
+   case OP_AND:
+   case OP_OR:
+   case OP_XOR:
+      srcNr = 2;
+      break;
    case OP_ADD:
    case OP_SUB:
       if (!carry)
