@@ -2298,18 +2298,14 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             return SPV_ERROR_INVALID_LOOKUP;
          }
          auto type = search_selector->second.type;
-         auto const width = type->getSize() / 4u; // FIXME need to round it to upper
          BasicBlock *new_bb = bb;
          BasicBlock *old_bb = bb;
-         for (size_t i = 2u; i < parsedInstruction->num_operands; i += width + 1u) {
-            Words values = Words();
-            for (unsigned int j = 0u; j < width; ++j)
-               values.push_back(spirv::getOperand<unsigned>(parsedInstruction, i + j));
-            uint16_t operandIndex = 0u;
+         for (size_t i = 2u; i < parsedInstruction->num_operands; i += 2u) {
+            uint16_t operandIndex = i;
             auto imm = type->generateConstant(*this, parsedInstruction, operandIndex).front();
             auto imm2 = getScratch(type->getSize());
             mkMov(imm2, imm, type->getEnumType());
-            auto const label_id = spirv::getOperand<spv::Id>(parsedInstruction, i + width);
+            auto const label_id = spirv::getOperand<spv::Id>(parsedInstruction, i + 1u);
             auto pred = getScratch(1, FILE_PREDICATE);
             mkCmp(OP_SET, CC_EQ, TYPE_U32, pred, type->getEnumType(), search_selector->second.value[0].value, imm2);
             auto search_label = blocks.find(label_id);
