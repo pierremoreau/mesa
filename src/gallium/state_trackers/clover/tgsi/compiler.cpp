@@ -91,7 +91,8 @@ namespace {
 
       unsigned sz = tgsi_num_tokens(prog) * sizeof(tgsi_token);
       std::vector<char> data( (char *)prog, (char *)prog + sz );
-      m.secs.push_back({ 0, module::section::text_executable, sz, data });
+      m.secs.push_back({ 0, module::section::text_executable,
+                         module::section::flags_t::none, sz, data });
    }
 }
 
