@@ -333,11 +333,10 @@ clGetDeviceInfo(cl_device_id d_dev, cl_device_info param,
       buf.as_string() = dev.supported_extensions();
       break;
 
-   case CL_DEVICE_IL_VERSION_KHR:
+   case CL_DEVICE_IL_VERSION:
       if (dev.supported_extensions().find("cl_khr_il_program") == std::string::npos)
          throw error(CL_INVALID_VALUE);
       buf.as_string() = std::string("SPIR-V_1.0");
-
       break;
 
    case CL_DEVICE_PLATFORM:
