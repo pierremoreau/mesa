@@ -196,9 +196,9 @@ public:
       Type const* type;
       std::vector<PValue> value;
       std::vector<unsigned int> paddings; // How to align each component: this will be used by OpCopyMemory* for example
-      bool is_packed;
-      SpirVValue() : storageFile(SpirvFile::NONE), type(nullptr), value(), paddings(), is_packed(false) {}
-      SpirVValue(SpirvFile sf, const Type *t, const std::vector<PValue> &v, const std::vector<unsigned int> &p, bool ip = false) : storageFile(sf), type(t), value(v), paddings(p), is_packed(ip) {}
+      bool isPacked;
+      SpirVValue() : storageFile(SpirvFile::NONE), type(nullptr), value(), paddings(), isPacked(false) {}
+      SpirVValue(SpirvFile sf, const Type *t, const std::vector<PValue> &v, const std::vector<unsigned int> &p, bool ip = false) : storageFile(sf), type(t), value(v), paddings(p), isPacked(ip) {}
       bool isUndefined() const { return type == nullptr; }
       Value * getValue(BuildUtil *bld, unsigned int i) const {
          const PValue &pvalue = value[i];
@@ -272,10 +272,10 @@ public:
       virtual enum DataType getElementEnumType(unsigned int index, int isSigned = -1) const override;
       virtual unsigned int getGlobalIdx(std::vector<unsigned int> const& elementIds, unsigned position = 0u) const override;
       virtual void getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position = 0u) const override;
-      virtual std::vector<unsigned int> getPaddings() const override { return member_paddings; }
+      virtual std::vector<unsigned int> getPaddings() const override { return memberPaddings; }
 
       std::vector<Type*> members;
-      std::vector<unsigned int> member_paddings;
+      std::vector<unsigned int> memberPaddings;
       unsigned size;
    };
    class TypeVector : public Type {
@@ -288,17 +288,17 @@ public:
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
       virtual unsigned int getSize(void) const override;
       virtual enum DataType getEnumType(int isSigned = -1) const override;
-      virtual unsigned int getElementsNb(void) const override { return static_cast<unsigned>(elements_nb); }
+      virtual unsigned int getElementsNb(void) const override { return static_cast<unsigned>(elementsNb); }
       virtual unsigned int getElementSize(unsigned int /*index*/) const override;
       virtual Type const* getElementType(unsigned int /*index*/) const override;
       virtual enum DataType getElementEnumType(unsigned int /*index*/, int isSigned = -1) const override;
       virtual unsigned int getGlobalIdx(std::vector<unsigned int> const& elementIds, unsigned position = 0u) const override;
       virtual void getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position = 0u) const override;
       virtual std::vector<unsigned int> getPaddings() const override;
-      virtual bool isVectorOfSize(unsigned int size) const override { return size == elements_nb; }
+      virtual bool isVectorOfSize(unsigned int size) const override { return size == elementsNb; }
 
-      Type* component_type;
-      word elements_nb;
+      Type* componentType;
+      word elementsNb;
    };
    class TypeArray : public Type {
    public:
@@ -309,7 +309,7 @@ public:
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override;
       virtual unsigned int getSize(void) const override;
       virtual enum DataType getEnumType(int isSigned = -1) const override;
-      virtual unsigned int getElementsNb(void) const override { return elements_nb; }
+      virtual unsigned int getElementsNb(void) const override { return elementsNb; }
       virtual unsigned int getElementSize(unsigned int /*index*/) const override;
       virtual Type const* getElementType(unsigned int /*index*/) const override;
       virtual enum DataType getElementEnumType(unsigned int /*index*/, int isSigned = -1) const override;
@@ -317,8 +317,8 @@ public:
       virtual void getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position = 0u) const override;
       virtual std::vector<unsigned int> getPaddings() const override;
 
-      Type* component_type;
-      unsigned elements_nb;
+      Type* componentType;
+      unsigned elementsNb;
    };
    class TypePointer : public Type {
    public:
@@ -361,7 +361,7 @@ public:
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
 
       spv::Id id;
-      spv::Id sampled_type;
+      spv::Id sampledType;
       spv::Dim dim;
       word depth;
       word arrayed;
@@ -375,10 +375,10 @@ public:
       TypeSampledImage(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeSampledImage() {}
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
-      spv::Id getImageType() const { return image_type; }
+      spv::Id getImageType() const { return imageType; }
 
       spv::Id id;
-      spv::Id image_type;
+      spv::Id imageType;
    };
    struct Sampler {
       TypeSampler const* type;
@@ -410,8 +410,8 @@ private:
                                 bool hasMember = false);
    template<typename T> spv_result_t convertType(const spv_parsed_instruction_t *parsedInstruction);
    Symbol * createSymbol(SpirvFile file, DataType type, unsigned int size, unsigned int offset) {
-      Symbol *base_symbol = baseSymbols[file];
-      Symbol *sym = new_Symbol(prog, base_symbol->reg.file, base_symbol->reg.fileIndex);
+      Symbol *baseSymbol = baseSymbols[file];
+      Symbol *sym = new_Symbol(prog, baseSymbol->reg.file, baseSymbol->reg.fileIndex);
       sym->reg.type = type;
       sym->reg.size = size;
 
@@ -419,7 +419,7 @@ private:
       if (file == SpirvFile::INPUT)
          offset += info->prop.cp.inputOffset;
 
-      sym->setAddress(base_symbol, offset);
+      sym->setAddress(baseSymbol, offset);
 
       return sym;
    }
@@ -720,36 +720,36 @@ Converter::TypeStruct::TypeStruct(const spv_parsed_instruction_t *const parsedIn
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    size = 0u;
    members.reserve(parsedInstruction->num_operands - 1u);
-   auto largest_alignment = 0u;
+   auto largestAlignment = 0u;
 
-   bool is_packed = false;
+   bool isPacked = false;
    const auto &decos = decorations.find(id);
    if (decos != decorations.end())
-      is_packed = decos->second.find(spv::Decoration::CPacked) != decos->second.end();
+      isPacked = decos->second.find(spv::Decoration::CPacked) != decos->second.end();
 
    for (unsigned int i = 1u; i < parsedInstruction->num_operands; ++i) {
-      const auto member_id = spirv::getOperand<spv::Id>(parsedInstruction, i);
-      auto search = types.find(member_id);
+      const auto memberId = spirv::getOperand<spv::Id>(parsedInstruction, i);
+      auto search = types.find(memberId);
       assert(search != types.end());
 
       members.push_back(search->second);
 
-      const auto member_size = search->second->getSize();
-      const auto member_alignment = is_packed ? 1u : search->second->getAlignment();
-      largest_alignment = std::max(largest_alignment, member_alignment);
-      const auto padding = (-size) & (member_alignment - 1u);
-      size += padding + member_size;
+      const auto memberSize = search->second->getSize();
+      const auto memberAlignment = isPacked ? 1u : search->second->getAlignment();
+      largestAlignment = std::max(largestAlignment, memberAlignment);
+      const auto padding = (-size) & (memberAlignment - 1u);
+      size += padding + memberSize;
 
       if (search->second->isCompooundType()) {
          auto paddings = search->second->getPaddings();
          paddings[0] += padding;
-         member_paddings.insert(member_paddings.end(), paddings.begin(), paddings.end());
+         memberPaddings.insert(memberPaddings.end(), paddings.begin(), paddings.end());
       } else {
-         member_paddings.push_back(padding);
+         memberPaddings.push_back(padding);
       }
    }
-   size += (-size) & (largest_alignment - 1u);
-   alignment = largest_alignment;
+   size += (-size) & (largestAlignment - 1u);
+   alignment = largestAlignment;
 }
 
 std::vector<ImmediateValue *>
@@ -766,12 +766,12 @@ Converter::TypeStruct::generateConstant(Converter &conv, const spv_parsed_instru
 std::vector<Value *>
 Converter::TypeStruct::generateNullConstant(Converter &conv) const
 {
-   std::vector<Value *> null_constant;
+   std::vector<Value *> nullConstant;
    for (const Type *member : members) {
       const auto constants = member->generateNullConstant(conv);
-      null_constant.insert(null_constant.end(), constants.begin(), constants.end());
+      nullConstant.insert(nullConstant.end(), constants.begin(), constants.end());
    }
-   return null_constant;
+   return nullConstant;
 }
 
 enum DataType
@@ -819,14 +819,14 @@ Converter::TypeStruct::getGlobalOffset(BuildUtil *bu, Decoration const& decorati
    assert(position < ids.size());
 
    const auto imm = ids[position];
-   uint32_t struct_off = 0u;
+   uint32_t structOff = 0u;
    for (int i = 0; i < imm->reg.data.u32; ++i)
-      struct_off += members[i]->getSize();
+      structOff += members[i]->getSize();
    auto res = bu->getScratch(offset->reg.size);
    if (offset->reg.type == TYPE_U64)
-      bu->loadImm(res, static_cast<unsigned long>(struct_off));
+      bu->loadImm(res, static_cast<unsigned long>(structOff));
    else
-      bu->loadImm(res, struct_off);
+      bu->loadImm(res, structOff);
    bu->mkOp2(OP_ADD, offset->reg.type, offset, offset, res);
 
    if (position + 1u < ids.size()) {
@@ -839,48 +839,48 @@ Converter::TypeVector::TypeVector(const spv_parsed_instruction_t *const parsedIn
                                   std::unordered_map<spv::Id, Type*> const& types) : Type(spv::Op::OpTypeVector)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-   spv::Id const component_type_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-   auto search = types.find(component_type_id);
+   spv::Id const componentTypeId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+   auto search = types.find(componentTypeId);
    assert(search != types.end());
 
-   component_type = search->second;
-   elements_nb = spirv::getOperand<unsigned>(parsedInstruction, 2u);
-   alignment = (elements_nb != 3u) ? elements_nb * component_type->getSize() : 4u * component_type->getSize();
+   componentType = search->second;
+   elementsNb = spirv::getOperand<unsigned>(parsedInstruction, 2u);
+   alignment = (elementsNb != 3u) ? elementsNb * componentType->getSize() : 4u * componentType->getSize();
 }
 
 // TODO(pmoreau): check this one, this does not seem correct.
 std::vector<ImmediateValue *>
 Converter::TypeVector::generateConstant(Converter &conv, const spv_parsed_instruction_t *parsedInstruction, uint16_t &operandIndex) const
 {
-   std::vector<ImmediateValue *> imms_constant;
-   const auto member_constant = component_type->generateConstant(conv, parsedInstruction, operandIndex);
-   for (unsigned int i = 0u; i < elements_nb; ++i)
-      imms_constant.insert(imms_constant.end(), member_constant.begin(), member_constant.end());
-   return imms_constant;
+   std::vector<ImmediateValue *> immsConstant;
+   const auto memberConstant = componentType->generateConstant(conv, parsedInstruction, operandIndex);
+   for (unsigned int i = 0u; i < elementsNb; ++i)
+      immsConstant.insert(immsConstant.end(), memberConstant.begin(), memberConstant.end());
+   return immsConstant;
 }
 
 std::vector<Value *>
 Converter::TypeVector::generateNullConstant(Converter &conv) const
 {
-   std::vector<Value *> null_constant;
-   const auto member_constant = component_type->generateNullConstant(conv);
-   for (unsigned int i = 0u; i < elements_nb; ++i)
-      null_constant.insert(null_constant.end(), member_constant.begin(), member_constant.end());
-   return null_constant;
+   std::vector<Value *> nullConstant;
+   const auto memberConstant = componentType->generateNullConstant(conv);
+   for (unsigned int i = 0u; i < elementsNb; ++i)
+      nullConstant.insert(nullConstant.end(), memberConstant.begin(), memberConstant.end());
+   return nullConstant;
 }
 
 unsigned int
 Converter::TypeVector::getSize(void) const
 {
-   assert(component_type != nullptr);
-   return component_type->getSize() * ((elements_nb != 3u) ? elements_nb : 4u);
+   assert(componentType != nullptr);
+   return componentType->getSize() * ((elementsNb != 3u) ? elementsNb : 4u);
 }
 
 Converter::Type const*
 Converter::TypeVector::getElementType(unsigned int /*index*/) const
 {
-   assert(component_type != nullptr);
-   return component_type;
+   assert(componentType != nullptr);
+   return componentType;
 }
 
 enum DataType
@@ -892,15 +892,15 @@ Converter::TypeVector::getEnumType(int /*isSigned*/) const
 unsigned int
 Converter::TypeVector::getElementSize(unsigned int /*index*/) const
 {
-   assert(component_type != nullptr);
-   return component_type->getSize();
+   assert(componentType != nullptr);
+   return componentType->getSize();
 }
 
 enum DataType
 Converter::TypeVector::getElementEnumType(unsigned int /*index*/, int isSigned) const
 {
-   assert(component_type != nullptr);
-   return component_type->getEnumType(isSigned);
+   assert(componentType != nullptr);
+   return componentType->getEnumType(isSigned);
 }
 
 
@@ -914,13 +914,13 @@ Converter::TypeVector::getGlobalIdx(std::vector<unsigned int> const& elementIds,
 void
 Converter::TypeVector::getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position) const
 {
-   assert(component_type != nullptr && position < ids.size());
+   assert(componentType != nullptr && position < ids.size());
 
    auto res = bu->getScratch(offset->reg.size);
    if (offset->reg.type == TYPE_U64)
-      bu->loadImm(res, static_cast<unsigned long>(component_type->getSize()));
+      bu->loadImm(res, static_cast<unsigned long>(componentType->getSize()));
    else
-      bu->loadImm(res, component_type->getSize());
+      bu->loadImm(res, componentType->getSize());
    Value *index = bu->getScratch(offset->reg.size);
    bu->mkMov(index, ids[position], offset->reg.type);
    bu->mkOp3(OP_MAD, offset->reg.type, offset, index, res, offset);
@@ -935,9 +935,9 @@ std::vector<unsigned int>
 Converter::TypeVector::getPaddings() const
 {
    std::vector<unsigned int> paddings;
-   const auto element_paddings = component_type->getPaddings();
-   for (unsigned int i = 0u; i < elements_nb; ++i)
-      paddings.insert(paddings.end(), element_paddings.cbegin(), element_paddings.cend());
+   const auto elementPaddings = componentType->getPaddings();
+   for (unsigned int i = 0u; i < elementsNb; ++i)
+      paddings.insert(paddings.end(), elementPaddings.cbegin(), elementPaddings.cend());
    return paddings;
 }
 
@@ -946,41 +946,41 @@ Converter::TypeArray::TypeArray(const spv_parsed_instruction_t *const parsedInst
                                 const ValueMap &m) : Type(spv::Op::OpTypeArray)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-   spv::Id const component_type_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-   auto search = types.find(component_type_id);
+   spv::Id const componentTypeId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+   auto search = types.find(componentTypeId);
    assert(search != types.end());
 
-   component_type = search->second;
-   spv::Id const elements_nb_id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-   auto searchElemNb = m.find(elements_nb_id);
+   componentType = search->second;
+   spv::Id const elementsNbId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+   auto searchElemNb = m.find(elementsNbId);
    assert(searchElemNb != m.end() && searchElemNb->second.storageFile == SpirvFile::IMMEDIATE);
-   elements_nb = searchElemNb->second.value.front().value->asImm()->reg.data.u32;
-   alignment = component_type->getAlignment();
+   elementsNb = searchElemNb->second.value.front().value->asImm()->reg.data.u32;
+   alignment = componentType->getAlignment();
 }
 
 std::vector<Value *>
 Converter::TypeArray::generateNullConstant(Converter &conv) const
 {
-   std::vector<Value *> null_constant;
-   const auto member_constant = component_type->generateNullConstant(conv);
-   for (unsigned int i = 0u; i < elements_nb; ++i)
-      null_constant.insert(null_constant.end(), member_constant.begin(), member_constant.end());
-   return null_constant;
+   std::vector<Value *> nullConstant;
+   const auto memberConstant = componentType->generateNullConstant(conv);
+   for (unsigned int i = 0u; i < elementsNb; ++i)
+      nullConstant.insert(nullConstant.end(), memberConstant.begin(), memberConstant.end());
+   return nullConstant;
 }
 
 Converter::Type const*
 Converter::TypeArray::getElementType(unsigned int /*index*/) const
 {
-   assert(component_type != nullptr);
-   return component_type;
+   assert(componentType != nullptr);
+   return componentType;
 }
 
 unsigned int
 Converter::TypeArray::getSize(void) const
 {
-   assert(component_type != nullptr);
-   assert(elements_nb != 0u);
-   return component_type->getSize() * elements_nb;
+   assert(componentType != nullptr);
+   assert(elementsNb != 0u);
+   return componentType->getSize() * elementsNb;
 }
 
 enum DataType
@@ -992,15 +992,15 @@ Converter::TypeArray::getEnumType(int /*isSigned*/) const
 unsigned int
 Converter::TypeArray::getElementSize(unsigned int /*index*/) const
 {
-   assert(component_type != nullptr);
-   return component_type->getSize();
+   assert(componentType != nullptr);
+   return componentType->getSize();
 }
 
 enum DataType
 Converter::TypeArray::getElementEnumType(unsigned int /*index*/, int isSigned) const
 {
-   assert(component_type != nullptr);
-   return component_type->getEnumType(isSigned);
+   assert(componentType != nullptr);
+   return componentType->getEnumType(isSigned);
 }
 
 
@@ -1014,27 +1014,27 @@ Converter::TypeArray::getGlobalIdx(std::vector<unsigned int> const& elementIds, 
 void
 Converter::TypeArray::getGlobalOffset(BuildUtil *bu, Decoration const& decoration, Value *offset, std::vector<Value *> ids, unsigned position) const
 {
-   assert(component_type != nullptr && position < ids.size());
+   assert(componentType != nullptr && position < ids.size());
 
    auto res = bu->getScratch(offset->reg.size);
    if (offset->reg.type == TYPE_U64)
-      bu->loadImm(res, static_cast<unsigned long>(component_type->getSize()));
+      bu->loadImm(res, static_cast<unsigned long>(componentType->getSize()));
    else
-      bu->loadImm(res, component_type->getSize());
+      bu->loadImm(res, componentType->getSize());
    Value *index = bu->getScratch(offset->reg.size);
    bu->mkMov(index, ids[position], offset->reg.type);
    bu->mkOp3(OP_MAD, offset->reg.type, offset, index, res, offset);
 
-   component_type->getGlobalOffset(bu, decoration, offset, ids, position + 1u);
+   componentType->getGlobalOffset(bu, decoration, offset, ids, position + 1u);
 }
 
 std::vector<unsigned int>
 Converter::TypeArray::getPaddings() const
 {
    std::vector<unsigned int> paddings;
-   const auto element_paddings = component_type->getPaddings();
-   for (unsigned int i = 0u; i < elements_nb; ++i)
-      paddings.insert(paddings.end(), element_paddings.begin(), element_paddings.end());
+   const auto elementPaddings = componentType->getPaddings();
+   for (unsigned int i = 0u; i < elementsNb; ++i)
+      paddings.insert(paddings.end(), elementPaddings.begin(), elementPaddings.end());
    return paddings;
 }
 
@@ -1044,8 +1044,8 @@ Converter::TypePointer::TypePointer(const spv_parsed_instruction_t *const parsed
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
    storage = spirv::getOperand<spv::StorageClass>(parsedInstruction, 1u);
-   auto const type_id = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-   auto search = types.find(type_id);
+   auto const typeId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+   auto search = types.find(typeId);
    assert(search != types.end());
 
    type = search->second;
@@ -1075,17 +1075,17 @@ Converter::TypePointer::getGlobalOffset(BuildUtil *bu, Decoration const& decorat
    assert(position < ids.size());
 
    if (storage != spv::StorageClass::Function) {
-      unsigned int type_size = type->getSize();
+      unsigned int typeSize = type->getSize();
 
-      auto search_alignment = decoration.find(spv::Decoration::Alignment);
-      if (search_alignment != decoration.end())
-         type_size += (-type_size) & (search_alignment->second[0][0] - 1u);
+      auto searchAlignment = decoration.find(spv::Decoration::Alignment);
+      if (searchAlignment != decoration.end())
+         typeSize += (-typeSize) & (searchAlignment->second[0][0] - 1u);
 
       Value *tmp = bu->getScratch(offset->reg.size);
       if (offset->reg.type == TYPE_U64)
-         bu->loadImm(tmp, static_cast<unsigned long>(type_size));
+         bu->loadImm(tmp, static_cast<unsigned long>(typeSize));
       else
-         bu->loadImm(tmp, type_size);
+         bu->loadImm(tmp, typeSize);
       Value *index = bu->getScratch(offset->reg.size);
       bu->mkMov(index, ids[position], offset->reg.type);
       bu->mkOp3(OP_MAD, offset->reg.type, offset, tmp, index, offset);
@@ -1115,14 +1115,14 @@ Converter::TypeSampler::TypeSampler(const spv_parsed_instruction_t *const parsed
 Converter::TypeSampledImage::TypeSampledImage(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeSampledImage)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-   image_type = spirv::getOperand<spv::Id>(parsedInstruction, 1);
+   imageType = spirv::getOperand<spv::Id>(parsedInstruction, 1);
    alignment = 0u;
 }
 
 Converter::TypeImage::TypeImage(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeImage)
 {
    id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-   sampled_type = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+   sampledType = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
    dim = spirv::getOperand<spv::Dim>(parsedInstruction, 2u);
    depth = spirv::getOperand<unsigned>(parsedInstruction, 3u);
    arrayed = spirv::getOperand<unsigned>(parsedInstruction, 4u);
@@ -1159,14 +1159,14 @@ Converter::acquire(SpirvFile file, spv::Id id, Type const* type)
    auto values = std::vector<PValue>();
    Value *res = nullptr;
 
-   auto save_to_share = file == SpirvFile::SHARED;
+   auto saveToShare = file == SpirvFile::SHARED;
 
-   const Type *processed_type = type;
+   const Type *processedType = type;
    std::stack<const Type *> types;
-   auto ptr_type = reinterpret_cast<const TypePointer *>(type);
-   if (type->getType() == spv::Op::OpTypePointer && ptr_type->getStorageFile() == SpirvFile::TEMPORARY)
-      processed_type = ptr_type->getPointedType();
-   types.push(processed_type);
+   auto ptrType = reinterpret_cast<const TypePointer *>(type);
+   if (type->getType() == spv::Op::OpTypePointer && ptrType->getStorageFile() == SpirvFile::TEMPORARY)
+      processedType = ptrType->getPointedType();
+   types.push(processedType);
 
    while (!types.empty()) {
       const Type *currentType = types.top();
@@ -1183,11 +1183,11 @@ Converter::acquire(SpirvFile file, spv::Id id, Type const* type)
          values.push_back(res);
       else
          values.emplace_back(res->asSym(), nullptr);
-      if (save_to_share)
+      if (saveToShare)
          info->bin.smemSize += currentType->getSize();
    }
 
-   spvValues.emplace(id, SpirVValue{ file, type, values, processed_type->getPaddings() });
+   spvValues.emplace(id, SpirVValue{ file, type, values, processedType->getPaddings() });
 
    return res;
 }
@@ -1706,7 +1706,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    auto getStructForOperand = [&](unsigned int operandIndex){
       return getStruct(getIdOfOperand(operandIndex));
    };
-   auto getOp = [&](spv::Id id, unsigned c = 0u, bool constants_allowed = true){
+   auto getOp = [&](spv::Id id, unsigned c = 0u, bool constantsAllowed = true){
       auto searchOp = spvValues.find(id);
       if (searchOp == spvValues.end())
          return PValue();
@@ -1720,7 +1720,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       auto const pvalue = opStruct.value[c];
       auto op = pvalue.value;
       if (opStruct.storageFile == SpirvFile::IMMEDIATE) {
-         if (!constants_allowed)
+         if (!constantsAllowed)
             return PValue();
          auto constant = op;
          op = getScratch(constant->reg.size);
@@ -1923,14 +1923,14 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       {
          const Type *resType = types.find(parsedInstruction->type_id)->second;
          const spv::Id resId = parsedInstruction->result_id;
-         auto storage_file = getStorageFile(spirv::getOperand<spv::StorageClass>(parsedInstruction, 2u));
+         auto storageFile = getStorageFile(spirv::getOperand<spv::StorageClass>(parsedInstruction, 2u));
 
          bool isBuiltIn = false;
-         auto search_decorations = decorations.find(resId);
-         if (search_decorations != decorations.end()) {
-            isBuiltIn = search_decorations->second.find(spv::Decoration::BuiltIn) != search_decorations->second.end();
-            auto search_linkage = search_decorations->second.find(spv::Decoration::BuiltIn);
-            if (!isBuiltIn && search_linkage != search_decorations->second.end() && static_cast<spv::LinkageType>(search_linkage->second[0][0]) == spv::LinkageType::Import) {
+         auto searchDecorations = decorations.find(resId);
+         if (searchDecorations != decorations.end()) {
+            isBuiltIn = searchDecorations->second.find(spv::Decoration::BuiltIn) != searchDecorations->second.end();
+            auto searchLinkage = searchDecorations->second.find(spv::Decoration::BuiltIn);
+            if (!isBuiltIn && searchLinkage != searchDecorations->second.end() && static_cast<spv::LinkageType>(searchLinkage->second[0][0]) == spv::LinkageType::Import) {
                _debug_printf("Variable %u has linkage type \"import\"! Missing a link step?\n", resId);
                return SPV_ERROR_INVALID_POINTER;
             }
@@ -1941,11 +1941,11 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 
             // If we have an immediate, which is stored in const memory,
             // inline it
-            if (storage_file == SpirvFile::CONST && init.storageFile == SpirvFile::IMMEDIATE)
-               storage_file = SpirvFile::IMMEDIATE;
-            spvValues.emplace(resId, SpirVValue{ storage_file, resType, init.value, init.paddings });
+            if (storageFile == SpirvFile::CONST && init.storageFile == SpirvFile::IMMEDIATE)
+               storageFile = SpirvFile::IMMEDIATE;
+            spvValues.emplace(resId, SpirVValue{ storageFile, resType, init.value, init.paddings });
          } else if (!isBuiltIn) {
-            acquire(storage_file, resId, resType);
+            acquire(storageFile, resId, resType);
          }
       }
       break;
@@ -1969,9 +1969,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpFunction:
       {
          spv::Id id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto search_func = functions.find(id);
-         if (search_func != functions.end()) {
-            func = search_func->second;
+         auto searchFunc = functions.find(id);
+         if (searchFunc != functions.end()) {
+            func = searchFunc->second;
             setPosition(BasicBlock::get(func->cfg.getRoot()), true);
             return SPV_SUCCESS;
          }
@@ -1981,17 +1981,17 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          using FCM = spv::FunctionControlMask;
          FCM control = spirv::getOperand<FCM>(parsedInstruction, 2u);
 
-         auto search_name = names.find(id);
-         if (search_name == names.end()) {
+         auto searchName = names.find(id);
+         if (searchName == names.end()) {
             _debug_printf("Couldn't find a name for function\n");
             return SPV_ERROR_INVALID_LOOKUP;
          }
-         auto search_entry = entryPoints.find(id);
-         auto const label = (search_entry == entryPoints.end()) ? UINT32_MAX : search_entry->second.index; // XXX valid symbol needed for functions?
-         auto &name = search_name->second;
-         char *func_name = new char[name.size() + 1u];
-         std::strncpy(func_name, name.c_str(), name.size() + 1u);
-         Function *function = new Function(prog, func_name, label);
+         auto searchEntry = entryPoints.find(id);
+         auto const label = (searchEntry == entryPoints.end()) ? UINT32_MAX : searchEntry->second.index; // XXX valid symbol needed for functions?
+         auto &name = searchName->second;
+         char *funcName = new char[name.size() + 1u];
+         std::strncpy(funcName, name.c_str(), name.size() + 1u);
+         Function *function = new Function(prog, funcName, label);
          functions.emplace(id, function);
          func = function;
          currentFuncId = id;
@@ -2020,9 +2020,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             return SPV_ERROR_INVALID_LOOKUP;
          }
          bool isKernel = false;
-         auto search_entry = entryPoints.find(currentFuncId);
-         if (search_entry != entryPoints.end())
-            isKernel = (search_entry->second.executionModel == spv::ExecutionModel::Kernel);
+         auto searchEntry = entryPoints.find(currentFuncId);
+         if (searchEntry != entryPoints.end())
+            isKernel = (searchEntry->second.executionModel == spv::ExecutionModel::Kernel);
 
          Type *paramType = search->second;
          SpirvFile destStorageFile = (paramType->getType() != spv::Op::OpTypePointer) ? SpirvFile::TEMPORARY : reinterpret_cast<const TypePointer *>(paramType)->getStorageFile();
@@ -2319,52 +2319,52 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpSwitch:
       {
          spv::Id selectorId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto search_selector = spvValues.find(selectorId);
-         if (search_selector == spvValues.end()) {
+         auto searchSelector = spvValues.find(selectorId);
+         if (searchSelector == spvValues.end()) {
             _debug_printf("Could not find selector with id %u\n", selectorId);
             return SPV_ERROR_INVALID_LOOKUP;
          }
-         auto type = search_selector->second.type;
-         BasicBlock *new_bb = bb;
-         BasicBlock *old_bb = bb;
+         auto type = searchSelector->second.type;
+         BasicBlock *newBb = bb;
+         BasicBlock *oldBb = bb;
          for (size_t i = 2u; i < parsedInstruction->num_operands; i += 2u) {
             uint16_t operandIndex = i;
             auto imm = type->generateConstant(*this, parsedInstruction, operandIndex).front();
             auto imm2 = getScratch(type->getSize());
             mkMov(imm2, imm, type->getEnumType());
-            auto const label_id = spirv::getOperand<spv::Id>(parsedInstruction, i + 1u);
+            auto const labelId = spirv::getOperand<spv::Id>(parsedInstruction, i + 1u);
             auto pred = getScratch(1, FILE_PREDICATE);
-            mkCmp(OP_SET, CC_EQ, TYPE_U32, pred, type->getEnumType(), search_selector->second.value[0].value, imm2);
-            auto search_label = blocks.find(label_id);
-            if (search_label == blocks.end()) {
+            mkCmp(OP_SET, CC_EQ, TYPE_U32, pred, type->getEnumType(), searchSelector->second.value[0].value, imm2);
+            auto searchLabel = blocks.find(labelId);
+            if (searchLabel == blocks.end()) {
                auto flow = mkFlow(OP_BRA, nullptr, CC_P, pred);
-               auto searchFlow = branchesToMatch.find(label_id);
+               auto searchFlow = branchesToMatch.find(labelId);
                if (searchFlow == branchesToMatch.end())
-                  branchesToMatch.emplace(label_id, std::vector<FlowInstruction*>{ flow });
+                  branchesToMatch.emplace(labelId, std::vector<FlowInstruction*>{ flow });
                else
                   searchFlow->second.push_back(flow);
             } else {
-               mkFlow(OP_BRA, search_label->second, CC_P, pred);
-               old_bb->cfg.attach(&search_label->second->cfg, Graph::Edge::BACK);
+               mkFlow(OP_BRA, searchLabel->second, CC_P, pred);
+               oldBb->cfg.attach(&searchLabel->second->cfg, Graph::Edge::BACK);
             }
-            new_bb = new BasicBlock(func);
-            old_bb->cfg.attach(&new_bb->cfg, Graph::Edge::TREE);
-            setPosition(new_bb, true);
-            old_bb = new_bb;
+            newBb = new BasicBlock(func);
+            oldBb->cfg.attach(&newBb->cfg, Graph::Edge::TREE);
+            setPosition(newBb, true);
+            oldBb = newBb;
          }
 
-         auto const default_id = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto search_label = blocks.find(default_id);
-         if (search_label == blocks.end()) {
+         auto const defaultId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
+         auto searchLabel = blocks.find(defaultId);
+         if (searchLabel == blocks.end()) {
             auto flow = mkFlow(OP_BRA, nullptr, CC_ALWAYS, nullptr);
-            auto searchFlow = branchesToMatch.find(default_id);
+            auto searchFlow = branchesToMatch.find(defaultId);
             if (searchFlow == branchesToMatch.end())
-               branchesToMatch.emplace(default_id, std::vector<FlowInstruction*>{ flow });
+               branchesToMatch.emplace(defaultId, std::vector<FlowInstruction*>{ flow });
             else
                searchFlow->second.push_back(flow);
          } else {
-            mkFlow(OP_BRA, search_label->second, CC_ALWAYS, nullptr);
-            new_bb->cfg.attach(&search_label->second->cfg, Graph::Edge::BACK);
+            mkFlow(OP_BRA, searchLabel->second, CC_ALWAYS, nullptr);
+            newBb->cfg.attach(&searchLabel->second->cfg, Graph::Edge::BACK);
          }
 
          bb = nullptr;
@@ -2372,10 +2372,10 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       break;
    case spv::Op::OpLoad:
       {
-         auto type_id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto searchType = types.find(type_id);
+         auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+         auto searchType = types.find(typeId);
          if (searchType == types.end()) {
-            _debug_printf("Couldn't find type with id %u\n", type_id);
+            _debug_printf("Couldn't find type with id %u\n", typeId);
             return SPV_ERROR_INVALID_LOOKUP;
          }
          auto type = searchType->second;
@@ -2388,9 +2388,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          if (hasFlag(access, spv::MemoryAccessShift::Aligned))
             alignment = spirv::getOperand<unsigned>(parsedInstruction, 4u);
 
-         auto search_decorations = decorations.find(pointerId);
-         if (search_decorations != decorations.end()) {
-            for (auto& decoration : search_decorations->second) {
+         auto searchDecorations = decorations.find(pointerId);
+         if (searchDecorations != decorations.end()) {
+            for (auto& decoration : searchDecorations->second) {
                if (decoration.first != spv::Decoration::BuiltIn)
                   continue;
 
@@ -2398,14 +2398,14 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             }
          }
 
-         auto search_pointer = spvValues.find(pointerId);
-         if (search_pointer == spvValues.end()) {
+         auto searchPointer = spvValues.find(pointerId);
+         if (searchPointer == spvValues.end()) {
             _debug_printf("Couldn't find pointer with id %u\n", pointerId);
             return SPV_ERROR_INVALID_LOOKUP;
          }
 
-         auto pointer_type = reinterpret_cast<const TypePointer *>(search_pointer->second.type);
-         load(SpirvFile::TEMPORARY, pointer_type->getStorageFile(), resId, search_pointer->second.value, 0u, type, access, alignment);
+         auto pointerType = reinterpret_cast<const TypePointer *>(searchPointer->second.type);
+         load(SpirvFile::TEMPORARY, pointerType->getStorageFile(), resId, searchPointer->second.value, 0u, type, access, alignment);
       }
       break;
    case spv::Op::OpStore:
@@ -2419,13 +2419,13 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          if (hasFlag(access, spv::MemoryAccessShift::Aligned))
             alignment = spirv::getOperand<unsigned>(parsedInstruction, 3u);
 
-         auto search_pointer = spvValues.find(pointerId);
-         if (search_pointer == spvValues.end()) {
+         auto searchPointer = spvValues.find(pointerId);
+         if (searchPointer == spvValues.end()) {
             _debug_printf("Couldn't find pointer with id %u\n", pointerId);
             return SPV_ERROR_INVALID_LOOKUP;
          }
 
-         auto pointer_type = reinterpret_cast<const TypePointer *>(search_pointer->second.type);
+         auto pointerType = reinterpret_cast<const TypePointer *>(searchPointer->second.type);
          auto searchElementStruct = spvValues.find(objectId);
          if (searchElementStruct == spvValues.end()) {
             _debug_printf("Couldn't find object with id %u\n", objectId);
@@ -2433,7 +2433,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          }
 
          auto value = searchElementStruct->second.value;
-         store(pointer_type->getStorageFile(), search_pointer->second.value, 0u, value, pointer_type->getPointedType(), access, alignment);
+         store(pointerType->getStorageFile(), searchPointer->second.value, 0u, value, pointerType->getPointedType(), access, alignment);
       }
       break;
    // TODO(pmoreau): Should have another look at it.
@@ -2494,15 +2494,15 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
                   std::function<unsigned int (const Type *type)> const &getMembersCount = [&getMembersCount](const Type *type) {
                      if (!type->isCompooundType())
                         return 1u;
-                     unsigned members_count = 0u;
+                     unsigned membersCount = 0u;
                      for (unsigned int i = 0u; i < type->getElementsNb(); ++i)
-                        members_count += getMembersCount(type->getElementType(i));
-                     return members_count;
+                        membersCount += getMembersCount(type->getElementType(i));
+                     return membersCount;
                   };
-                  int member_index = indices[depth]->reg.data.s32;
-                  for (int i = member_index - 1; i >= 0; --i)
+                  int memberIndex = indices[depth]->reg.data.s32;
+                  for (int i = memberIndex - 1; i >= 0; --i)
                      index += getMembersCount(currentType->getElementType(i));
-                  typesStack.push(currentType->getElementType(member_index));
+                  typesStack.push(currentType->getElementType(memberIndex));
                   ++depth;
                }
             }
@@ -2517,8 +2517,8 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
                offset->reg.type = TYPE_U64;
                loadImm(offset, 0lu);
             }
-            auto search_decorations = decorations.find(baseId);
-            baseType->getGlobalOffset(this, (search_decorations != decorations.end()) ? search_decorations->second : Decoration(), offset, indices);
+            auto searchDecorations = decorations.find(baseId);
+            baseType->getGlobalOffset(this, (searchDecorations != decorations.end()) ? searchDecorations->second : Decoration(), offset, indices);
             if (base.isValue()) {
                auto ptr = getScratch(offset->reg.size);
                mkOp2(OP_ADD, offset->reg.type, ptr, base.value, offset);
@@ -2681,7 +2681,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const auto targetStorage = target->second.storageFile;
          const auto sourceStorage = source->second.storageFile;
 
-         const bool is_packed = target->second.is_packed;
+         const bool isPacked = target->second.isPacked;
 
          if (targetStorage == SpirvFile::TEMPORARY && (sourceStorage == SpirvFile::TEMPORARY || sourceStorage == SpirvFile::IMMEDIATE)) {
             for (unsigned int i = 0, c = 0u; i < sizeImm && c < target->second.value.size(); i += typeSizeof(target->second.value[c].value->reg.type), ++c) {
@@ -2921,13 +2921,13 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpAtomicOr:
    case spv::Op::OpAtomicXor:
       {
-         const bool has_no_value = (opcode == spv::Op::OpAtomicIIncrement) || (opcode == spv::Op::OpAtomicIDecrement);
+         const bool hasNoValue = (opcode == spv::Op::OpAtomicIIncrement) || (opcode == spv::Op::OpAtomicIDecrement);
 
          const Type *resType = types.find(parsedInstruction->type_id)->second;
          const spv::Id resId = parsedInstruction->result_id;
          const SpirVValue &pointerStruct = getStructForOperand(2u);
          Value *pointer = pointerStruct.value.front().value;
-         Value *value = has_no_value ? nullptr : getStructForOperand(5u).value.front().value;
+         Value *value = hasNoValue ? nullptr : getStructForOperand(5u).value.front().value;
 
          const int _isSrcSigned = isSrcSigned(opcode);
 
