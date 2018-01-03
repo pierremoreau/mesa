@@ -427,6 +427,7 @@ private:
    nv50_ir::CondCode convertCc(spv::Op op);
    spv_result_t loadBuiltin(spv::Id dstId, Type const* dstType, Words const& decLiterals, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone);
    spv_result_t convertOpenCLInstruction(spv::Id resId, Type const* type, OpenCLLIB::Entrypoints op, const spv_parsed_instruction_t *parsedInstruction);
+   spv_result_t generateCtrlBarrier(spv::Scope executionScope);
    spv_result_t generateMemBarrier(spv::Scope memoryScope, spv::MemorySemanticsMask memorySemantics);
    int getSubOp(spv::Op opcode) const;
    static enum SpirvFile getStorageFile(spv::StorageClass storage);
@@ -1629,6 +1630,26 @@ Converter::convertCc(spv::Op op)
    default:
       return CC_NO;
    }
+}
+
+spv_result_t
+Converter::generateCtrlBarrier(spv::Scope executionScope)
+{
+   if (executionScope != spv::Scope::Subgroup && executionScope != spv::Scope::Workgroup) {
+      _debug_printf("Only subgroup and workgroup scopes are currently supported.\n");
+      return SPV_ERROR_INVALID_BINARY;
+   }
+
+   Instruction *insn = mkOp2(OP_BAR, TYPE_U32, nullptr, mkImm(0), mkImm(0));
+   insn->fixed = 1u;
+   if (executionScope == spv::Scope::Subgroup)
+      insn->subOp = NV50_IR_SUBOP_BAR_ARRIVE;
+   else if (executionScope == spv::Scope::Workgroup)
+      insn->subOp = NV50_IR_SUBOP_BAR_SYNC;
+
+   info->numBarriers = 1u;
+
+   return SPV_SUCCESS;
 }
 
 spv_result_t
@@ -3070,19 +3091,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const ImmediateValue *executionImm = getStructForOperand(0u).value.front().value->asImm();
          const spv::Scope execution = static_cast<spv::Scope>(executionImm->reg.data.u32);
 
-         if (execution != spv::Scope::Subgroup && execution != spv::Scope::Workgroup) {
-            _debug_printf("Only subgroup and workgroup scopes are currently supported.\n");
-            return SPV_ERROR_INVALID_BINARY;
-         }
-
-         Instruction *insn = mkOp2(OP_BAR, TYPE_U32, nullptr, mkImm(0), mkImm(0));
-         insn->fixed = 1u;
-         if (execution == spv::Scope::Subgroup)
-            insn->subOp = NV50_IR_SUBOP_BAR_ARRIVE;
-         else if (execution == spv::Scope::Workgroup)
-            insn->subOp = NV50_IR_SUBOP_BAR_SYNC;
-
-         info->numBarriers = 1u;
+         spv_result_t res = generateCtrlBarrier(execution);
+         if (res != SPV_SUCCESS)
+            return res;
 
          const ImmediateValue *memoryImm = getStructForOperand(1u).value.front().value->asImm();
          const ImmediateValue *memorySemanticsImm = getStructForOperand(2u).value.front().value->asImm();
@@ -3090,7 +3101,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const spv::MemorySemanticsMask memorySemantics = static_cast<spv::MemorySemanticsMask>(memorySemanticsImm->reg.data.u32);
 
          if (memorySemantics != spv::MemorySemanticsMask::MaskNone) {
-            const spv_result_t res = generateMemBarrier(memory, memorySemantics);
+            res = generateMemBarrier(memory, memorySemantics);
             if (res != SPV_SUCCESS)
                return res;
          }
