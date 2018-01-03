@@ -920,7 +920,9 @@ Converter::TypeVector::getGlobalOffset(BuildUtil *bu, Decoration const& decorati
       bu->loadImm(res, static_cast<unsigned long>(component_type->getSize()));
    else
       bu->loadImm(res, component_type->getSize());
-   bu->mkOp3(OP_MAD, offset->reg.type, offset, ids[position], res, offset);
+   Value *index = bu->getScratch(offset->reg.size);
+   bu->mkMov(index, ids[position], offset->reg.type);
+   bu->mkOp3(OP_MAD, offset->reg.type, offset, index, res, offset);
 
    if (position + 1u < ids.size()) {
       _debug_printf("Trying to dereference basic types\n");
@@ -1018,7 +1020,9 @@ Converter::TypeArray::getGlobalOffset(BuildUtil *bu, Decoration const& decoratio
       bu->loadImm(res, static_cast<unsigned long>(component_type->getSize()));
    else
       bu->loadImm(res, component_type->getSize());
-   bu->mkOp3(OP_MAD, offset->reg.type, offset, ids[position], res, offset);
+   Value *index = bu->getScratch(offset->reg.size);
+   bu->mkMov(index, ids[position], offset->reg.type);
+   bu->mkOp3(OP_MAD, offset->reg.type, offset, index, res, offset);
 
    component_type->getGlobalOffset(bu, decoration, offset, ids, position + 1u);
 }
@@ -1081,7 +1085,9 @@ Converter::TypePointer::getGlobalOffset(BuildUtil *bu, Decoration const& decorat
          bu->loadImm(tmp, static_cast<unsigned long>(type_size));
       else
          bu->loadImm(tmp, type_size);
-      bu->mkOp3(OP_MAD, offset->reg.type, offset, tmp, ids[position], offset);
+      Value *index = bu->getScratch(offset->reg.size);
+      bu->mkMov(index, ids[position], offset->reg.type);
+      bu->mkOp3(OP_MAD, offset->reg.type, offset, tmp, index, offset);
    } else {
       assert(ids[position]->asImm() != nullptr && ids[position]->asImm()->reg.data.u64 == 0ul);
    }
