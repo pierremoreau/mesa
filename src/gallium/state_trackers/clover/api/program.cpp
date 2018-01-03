@@ -460,7 +460,7 @@ clGetProgramInfo(cl_program d_prog, cl_program_info param,
       buf.as_string() = prog.source();
       break;
 
-   case CL_PROGRAM_IL_KHR:
+   case CL_PROGRAM_IL:
       if (prog.has_il)
          buf.as_vector<char>() = prog.il();
       else if (r_size)
