@@ -22,6 +22,7 @@
 
 #include "api/util.hpp"
 #include "core/program.hpp"
+#include "spirv/invocation.hpp"
 #include "util/u_debug.h"
 
 #include <sstream>
@@ -135,6 +136,27 @@ clCreateProgramWithBinary(cl_context d_ctx, cl_uint n,
    return NULL;
 }
 
+cl_program
+clover::CreateProgramWithILKHR(cl_context d_ctx, const void *il,
+                               const size_t length, cl_int *r_errcode) try {
+   auto &ctx = obj(d_ctx);
+
+   if (!il || !length)
+      throw error(CL_INVALID_VALUE);
+
+   const char *c_il = reinterpret_cast<const char*>(il);
+   if (!spirv::is_binary_spirv(c_il))
+      throw error(CL_INVALID_VALUE);
+
+   // initialize a program object with it.
+   ret_error(r_errcode, CL_SUCCESS);
+   return new program(ctx, c_il, length);
+
+} catch (error &e) {
+   ret_error(r_errcode, e);
+   return NULL;
+}
+
 CLOVER_API cl_program
 clCreateProgramWithBuiltInKernels(cl_context d_ctx, cl_uint n,
                                   const cl_device_id *d_devs,
@@ -189,7 +211,7 @@ clBuildProgram(cl_program d_prog, cl_uint num_devs,
    const auto opts = std::string(p_opts ? p_opts : "") + " " +
                      debug_get_option("CLOVER_EXTRA_BUILD_OPTIONS", "");
 
-   if (prog.has_source) {
+   if (prog.has_source || prog.has_il) {
       prog.compile(devs, opts);
       prog.link(devs, opts, { prog });
    } else if (any_of([&](const device &dev){
@@ -225,7 +247,7 @@ clCompileProgram(cl_program d_prog, cl_uint num_devs,
    if (bool(num_headers) != bool(header_names))
       throw error(CL_INVALID_VALUE);
 
-   if (!prog.has_source)
+   if (!prog.has_source && !prog.has_il)
       throw error(CL_INVALID_OPERATION);
 
    for_each([&](const char *name, const program &header) {

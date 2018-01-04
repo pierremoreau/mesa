@@ -43,6 +43,9 @@ namespace clover {
       program(clover::context &ctx,
               const ref_vector<device> &devs = {},
               const std::vector<module> &binaries = {});
+      program(clover::context &ctx,
+              const char *il,
+              size_t length);
 
       program(const program &prog) = delete;
       program &
@@ -55,6 +58,9 @@ namespace clover {
 
       const bool has_source;
       const std::string &source() const;
+
+      const bool has_il;
+      const std::vector<char> &il() const;
 
       device_range devices() const;
 
@@ -85,6 +91,7 @@ namespace clover {
       std::map<const device *, struct build> _builds;
       std::string _source;
       ref_counter _kernel_ref_counter;
+      std::vector<char> _il;
    };
 }
 
