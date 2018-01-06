@@ -388,17 +388,19 @@ public:
    };
    struct Sampler {
       TypeSampler const* type;
+      uint32_t index;
       spv::SamplerAddressingMode addressingMode;
       bool normalizedCoords;
       spv::SamplerFilterMode filterMode;
    };
    struct Image {
       TypeImage const* type;
+      uint32_t index;
    };
    struct SampledImage {
       TypeSampledImage const* type;
-      Value* image;
-      Value* sampler;//Sampler sampler;
+      const Image& image;
+      const Sampler& sampler;
    };
    struct FunctionData {
       Function* caller;
@@ -473,6 +475,8 @@ private:
    std::unordered_map<SpirvFile, Symbol *> baseSymbols;
    spv::Id currentFuncId;
    uint32_t inputOffset; // XXX maybe better to have a separate DataArray for input, keeping track
+   uint32_t samplerCounter;
+   uint32_t imageCounter;
 
    std::unordered_map<spv::Id, std::vector<FlowInstruction*>> branchesToMatch;
    std::unordered_map<spv::Id, std::vector<FunctionData>> functionsToMatch;
@@ -1926,7 +1930,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const auto filterMode = spirv::getOperand<spv::SamplerFilterMode>(parsedInstruction, 4u);
          const bool usesNormalizedCoords = param == 0u;
 
-         samplers.emplace(resId, Sampler{ reinterpret_cast<TypeSampler const*>(resType), addressingMode, usesNormalizedCoords, filterMode });
+         samplers.emplace(resId, Sampler{ reinterpret_cast<TypeSampler const*>(resType), 0u, addressingMode, usesNormalizedCoords, filterMode });
       }
       break;
    case spv::Op::OpVariable:
@@ -2005,6 +2009,8 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          functions.emplace(id, function);
          func = function;
          currentFuncId = id;
+         samplerCounter = 0u;
+         imageCounter = 0u;
 
          prog->main->call.attach(&func->call, Graph::Edge::TREE); // XXX only bind entry points to main?
          BasicBlock *block = new BasicBlock(func);
@@ -2036,14 +2042,16 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 
          Type *paramType = search->second;
 
-         // FIXME(pmoreau): Need to check on generations than Kepler (esp.
-         // Tesla)
+         // Samplers are not passed in the user input buffer.
          if (paramType->getType() == spv::Op::OpTypeSampler) {
-            samplers.emplace(id, Sampler{ reinterpret_cast<const TypeSampler*>(paramType) });
+            assert(isKernel);
+            samplers.emplace(id, Sampler{ reinterpret_cast<const TypeSampler*>(paramType), samplerCounter++ });
             return SPV_SUCCESS;
          }
+
          if (paramType->getType() == spv::Op::OpTypeImage) {
-            images.emplace(id, Image{ reinterpret_cast<const TypeImage*>(paramType) });
+            assert(isKernel);
+            images.emplace(id, Image{ reinterpret_cast<const TypeImage*>(paramType), imageCounter++ });
          }
 
          SpirvFile destStorageFile = (paramType->getType() != spv::Op::OpTypePointer) ? SpirvFile::TEMPORARY : reinterpret_cast<const TypePointer *>(paramType)->getStorageFile();
@@ -2162,6 +2170,8 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          func = nullptr;
          currentFuncId = 0u;
          inputOffset = 0u;
+         samplerCounter = 0u;
+         imageCounter = 0u;
       }
       break;
    case spv::Op::OpFunctionCall:
@@ -3145,20 +3155,19 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       {
          const Type *resType = types.find(parsedInstruction->type_id)->second;
          const spv::Id resId = parsedInstruction->result_id;
-         const SpirVValue &image = getStructForOperand(2u);
-         const SpirVValue &sampler = getStructForOperand(3u);
-         //const Sampler &sampler = samplers.find(getIdOfOperand(3u))->second;
+         const Image &image = images.find(getIdOfOperand(2u))->second;
+         const Sampler &sampler = samplers.find(getIdOfOperand(3u))->second;
 
-         sampledImages.emplace(resId, SampledImage{ reinterpret_cast<TypeSampledImage const*>(resType), image.value.front().value, nullptr });//sampler.value.front().value });
+         sampledImages.emplace(resId, SampledImage{ reinterpret_cast<TypeSampledImage const*>(resType), image, sampler });
       }
       break;
    case spv::Op::OpImageSampleExplicitLod:
       {
-         auto const typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto const resId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto const sampledImageId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto const coordinatesId = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
-         auto const operand = spirv::getOperand<spv::ImageOperandsMask>(parsedInstruction, 4u);
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         const SampledImage& sampledImage = sampledImages.find(getIdOfOperand(2u))->second;
+         const SpirVValue& coordinates = getStructForOperand(3u);
+         const auto operand = spirv::getOperand<spv::ImageOperandsMask>(parsedInstruction, 4u);
 
          unsigned int operandIndex = 5u;
          Value *bias = nullptr;
@@ -3188,42 +3197,22 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          if (hasFlag(operand, spv::ImageOperandsShift::MinLod))
             minLod = getOp(getIdOfOperand(operandIndex++)).value;
 
-         const bool specifyLod = lod != nullptr; // TODO(pmoreau): Check if lod is immediate and set to false if imm == 0.0f
+         const bool specifyLod = lod != nullptr && false;
 
-         auto searchType = types.find(typeId);
-         if (searchType == types.end()) {
-            _debug_printf("Could not find type %u\n", typeId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto searchSampledImage = sampledImages.find(sampledImageId);
-         if (searchSampledImage == sampledImages.end()) {
-            _debug_printf("Could not find sampled image %u\n", sampledImageId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto searchCoordinates = spvValues.find(coordinatesId);
-         if (searchCoordinates == spvValues.end()) {
-            _debug_printf("Could not find sampler %u\n", coordinatesId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         auto const componentSize = searchType->second->getElementType(0u)->getSize();
+         auto const componentSize = resType->getElementType(0u)->getSize();
          std::vector<PValue> res = { getScratch(componentSize), getScratch(componentSize), getScratch(componentSize), getScratch(componentSize) };
          std::vector<Value*> resValue;
          for (auto &i : res)
             resValue.push_back(i.value);
 
-         auto const sampledImageType = reinterpret_cast<TypeSampledImage const*>(searchSampledImage->second.type);
-         auto const imageTypeId = sampledImageType->getImageType();
-         auto searchImageType = types.find(imageTypeId);
-         if (searchImageType == types.end()) {
-            _debug_printf("Could not find type %u for sampler type %u\n", imageTypeId, sampledImageId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto const imageTarget = getTexTarget(reinterpret_cast<TypeImage const*>(searchImageType->second));
-         auto const tic = 0;
-         auto const tsc = 0;
+         const Image& image = sampledImage.image;
+         const Sampler& sampler = sampledImage.sampler;
+         const auto imageTarget = getTexTarget(image.type);
+         const auto tic = image.index;
+         const auto tsc = sampler.index;
+
          std::vector<Value*> args;
-         for (auto &i : searchCoordinates->second.value)
+         for (auto &i : coordinates.value)
             args.push_back(i.value);
          if (specifyLod)
             args.push_back(lod);
@@ -3231,11 +3220,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          auto ld = mkTex(OP_TEX, imageTarget, tic, tsc, resValue, args);
          ld->tex.levelZero = !specifyLod;
          ld->tex.mask = (1u << resValue.size()) - 1u;
-         ld->tex.format = getImageFormat(reinterpret_cast<TypeImage const*>(searchImageType->second)->format);
-         ld->tex.rIndirectSrc = -1;
-         ld->tex.sIndirectSrc = -1;
+         ld->tex.format = getImageFormat(image.type->format);
 
-         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, searchType->second, res, { 1u } });
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, res, { 1u } });
       }
       break;
    case spv::Op::OpImageWrite:
@@ -3275,14 +3262,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       {
          const Type *resType = types.find(parsedInstruction->type_id)->second;
          const spv::Id resId = parsedInstruction->result_id;
-         auto const imageId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
-         auto searchImage = images.find(imageId);
-         if (searchImage == images.end()) {
-            _debug_printf("Could not find image %u\n", imageId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         const TypeImage *imageType = reinterpret_cast<TypeImage const*>(searchImage->second.type);
-         auto const imageTarget = getTexTarget(imageType);
+         const Image& image = images.find(getIdOfOperand(2u))->second;
+         const TypeImage *imageType = image.type;
+         const auto imageTarget = getTexTarget(imageType);
 
          const auto componentSize = resType->getElementsNb() == 1u ? resType->getSize() : resType->getElementSize(0u);
          std::vector<PValue> res;
@@ -3306,11 +3288,10 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 
          Value *lod = opcode == spv::Op::OpImageQuerySizeLod ? getOp(getIdOfOperand(3u)).value : mkImm(0x0);
          std::vector<Value*> args = { lod };
-         auto const tic = 0;
+         const auto tic = image.index;
          auto ld = mkTex(OP_TXQ, imageTarget, tic, 0, resValue, args);
          ld->tex.mask = (1u << resValue.size()) - 1u;
          ld->tex.query = TexQuery::TXQ_DIMS;
-         ld->tex.rIndirectSrc = -1;
 
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, res, std::vector<uint32_t>(componentSize, res.size()) });
       }
