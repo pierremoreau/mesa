@@ -386,6 +386,9 @@ public:
       bool normalizedCoords;
       spv::SamplerFilterMode filterMode;
    };
+   struct Image {
+      TypeImage const* type;
+   };
    struct SampledImage {
       TypeSampledImage const* type;
       Value* image;
@@ -456,6 +459,7 @@ private:
    std::unordered_map<nv50_ir::Instruction*, spv::Id> phiMapping;
    std::unordered_map<spv::Id, std::unordered_map<uint32_t, std::pair<spv::Id, spv::Id>>> phiToMatch;
    std::unordered_map<spv::Id, Sampler> samplers;
+   std::unordered_map<spv::Id, Image> images;
    std::unordered_map<spv::Id, SampledImage> sampledImages;
 
    ValueMap spvValues;
@@ -2025,6 +2029,18 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             isKernel = (searchEntry->second.executionModel == spv::ExecutionModel::Kernel);
 
          Type *paramType = search->second;
+
+         // FIXME(pmoreau): Need to check on generations than Kepler (esp.
+         // Tesla)
+         if (paramType->getType() == spv::Op::OpTypeSampler) {
+            samplers.emplace(id, Sampler{ reinterpret_cast<const TypeSampler*>(paramType) });
+            return SPV_SUCCESS;
+         }
+         if (paramType->getType() == spv::Op::OpTypeImage) {
+            images.emplace(id, Image{ reinterpret_cast<const TypeImage*>(paramType) });
+            return SPV_SUCCESS;
+         }
+
          SpirvFile destStorageFile = (paramType->getType() != spv::Op::OpTypePointer) ? SpirvFile::TEMPORARY : reinterpret_cast<const TypePointer *>(paramType)->getStorageFile();
          auto decos = decorations.find(id);
          if (decos != decorations.end()) {
@@ -3125,9 +3141,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const Type *resType = types.find(parsedInstruction->type_id)->second;
          const spv::Id resId = parsedInstruction->result_id;
          const SpirVValue &image = getStructForOperand(2u);
-         const Sampler &sampler = samplers.find(getIdOfOperand(3u))->second;
+         //const Sampler &sampler = samplers.find(getIdOfOperand(3u))->second;
 
-         sampledImages.emplace(resId, SampledImage{ reinterpret_cast<TypeSampledImage const*>(resType), image.value.front().value, sampler });
+         sampledImages.emplace(resId, SampledImage{ reinterpret_cast<TypeSampledImage const*>(resType), nullptr, Sampler() });//image.value.front().value, sampler });
       }
       break;
    case spv::Op::OpImageSampleExplicitLod:
@@ -3137,9 +3153,36 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          auto const sampledImageId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
          auto const coordinatesId = spirv::getOperand<spv::Id>(parsedInstruction, 3u);
          auto const operand = spirv::getOperand<spv::ImageOperandsMask>(parsedInstruction, 4u);
-         auto operandArgs = std::vector<spv::Id>();
-         for (unsigned int i = 5u; i < parsedInstruction->num_operands; ++i)
-            operandArgs.push_back(spirv::getOperand<spv::Id>(parsedInstruction, i));
+
+         unsigned int operandIndex = 5u;
+         Value *bias = nullptr;
+         Value *lod = nullptr;
+         Value *gradDx = nullptr, *gradDy = nullptr;
+         Value *constOffset = nullptr;
+         Value *offset = nullptr;
+         Value *constOffsets = nullptr;
+         Value *sample = nullptr;
+         Value *minLod = nullptr;
+         if (hasFlag(operand, spv::ImageOperandsShift::Bias))
+            bias = getOp(getIdOfOperand(operandIndex++)).value;
+         if (hasFlag(operand, spv::ImageOperandsShift::Lod))
+            lod = getOp(getIdOfOperand(operandIndex++)).value;
+         if (hasFlag(operand, spv::ImageOperandsShift::Grad)) {
+            gradDx = getOp(getIdOfOperand(operandIndex++)).value;
+            gradDy = getOp(getIdOfOperand(operandIndex++)).value;
+         }
+         if (hasFlag(operand, spv::ImageOperandsShift::ConstOffset))
+            constOffset = getOp(getIdOfOperand(operandIndex++)).value;
+         if (hasFlag(operand, spv::ImageOperandsShift::Offset))
+            offset = getOp(getIdOfOperand(operandIndex++)).value;
+         if (hasFlag(operand, spv::ImageOperandsShift::ConstOffsets))
+            constOffsets = getOp(getIdOfOperand(operandIndex++)).value;
+         if (hasFlag(operand, spv::ImageOperandsShift::Sample))
+            sample = getOp(getIdOfOperand(operandIndex++)).value;
+         if (hasFlag(operand, spv::ImageOperandsShift::MinLod))
+            minLod = getOp(getIdOfOperand(operandIndex++)).value;
+
+         const bool specifyLod = lod != nullptr; // TODO(pmoreau): Check if lod is immediate and set to false if imm == 0.0f
 
          auto searchType = types.find(typeId);
          if (searchType == types.end()) {
@@ -3172,11 +3215,16 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          }
          auto const imageTarget = getTexTarget(reinterpret_cast<TypeImage const*>(searchImageType->second));
          auto const tic = 0;
+         auto const tsc = 0;
          std::vector<Value*> args;
          for (auto &i : searchCoordinates->second.value)
             args.push_back(i.value);
-         auto ld = mkTex(OP_SULDP, imageTarget, tic, 0, resValue, args);
-         ld->tex.mask = 0;
+         if (specifyLod)
+            args.push_back(lod);
+
+         auto ld = mkTex(OP_TEX, imageTarget, tic, tsc, resValue, args);
+         ld->tex.levelZero = !specifyLod;
+         ld->tex.mask = (1u << resValue.size()) - 1u;
          ld->tex.format = getImageFormat(reinterpret_cast<TypeImage const*>(searchImageType->second)->format);
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, searchType->second, res, { 1u } });
       }
@@ -3211,6 +3259,51 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          st->tex.mask = TGSI_WRITEMASK_XY;
          st->tex.format = getImageFormat(reinterpret_cast<TypeImage const*>(searchImage->second.type)->format);
 //         st->cache = tgsi.getCacheMode();
+      }
+      break;
+   case spv::Op::OpImageQuerySize:
+   case spv::Op::OpImageQuerySizeLod:
+      {
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+         auto const imageId = spirv::getOperand<spv::Id>(parsedInstruction, 2u);
+         auto searchImage = images.find(imageId);
+         if (searchImage == images.end()) {
+            _debug_printf("Could not find image %u\n", imageId);
+            return SPV_ERROR_INVALID_LOOKUP;
+         }
+         const TypeImage *imageType = reinterpret_cast<TypeImage const*>(searchImage->second.type);
+         auto const imageTarget = getTexTarget(imageType);
+
+         const auto componentSize = resType->getElementsNb() == 1u ? resType->getSize() : resType->getElementSize(0u);
+         std::vector<PValue> res;
+         switch (imageType->dim) {
+            case spv::Dim::Dim3D:
+               res.push_back(getScratch(componentSize));
+               // FALLTHROUGH
+            case spv::Dim::Dim2D:
+            case spv::Dim::Cube:
+               res.push_back(getScratch(componentSize));
+               // FALLTHROUGH
+            case spv::Dim::Dim1D:
+               res.push_back(getScratch(componentSize));
+               break;
+         }
+         if (imageType->arrayed)
+            res.push_back(getScratch(componentSize));
+         std::vector<Value*> resValue;
+         for (auto &i : res)
+            resValue.push_back(i.value);
+
+         Value *lod = opcode == spv::Op::OpImageQuerySizeLod ? getOp(getIdOfOperand(3u)).value : mkImm(0x0);
+         std::vector<Value*> args = { lod, getScratch() };
+         auto const tic = 0;
+         auto const tsc = 0;
+         auto ld = mkTex(OP_TXQ, imageTarget, tic, tsc, resValue, args);
+         ld->tex.mask = (1u << resValue.size()) - 1u;
+         ld->tex.query = TexQuery::TXQ_DIMS;
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, res, std::vector<uint32_t>(componentSize, res.size()) });
       }
       break;
    case spv::Op::OpIsInf:
