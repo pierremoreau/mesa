@@ -3225,38 +3225,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, res, { 1u } });
       }
       break;
-   case spv::Op::OpImageWrite:
-      {
-         auto const imageId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
-         auto const coordinatesId = spirv::getOperand<spv::Id>(parsedInstruction, 1u);
-         auto const operand = spirv::getOperand<spv::ImageOperandsMask>(parsedInstruction, 2u);
-         auto operandArgs = std::vector<spv::Id>();
-         for (unsigned int i = 3u; i < parsedInstruction->num_operands; ++i)
-            operandArgs.push_back(spirv::getOperand<spv::Id>(parsedInstruction, i));
-
-         auto searchImage = spvValues.find(imageId);
-         if (searchImage == spvValues.end()) {
-            _debug_printf("Could not find image %u\n", imageId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-         auto searchCoordinates = spvValues.find(coordinatesId);
-         if (searchCoordinates == spvValues.end()) {
-            _debug_printf("Could not find sampler %u\n", coordinatesId);
-            return SPV_ERROR_INVALID_LOOKUP;
-         }
-
-         // TODO
-         auto const imageTarget = getTexTarget(reinterpret_cast<TypeImage const*>(searchImage->second.type));
-         auto const tic = 0;
-         std::vector<Value*> args;
-         for (auto &i : searchCoordinates->second.value)
-            args.push_back(i.value);
-         auto st = mkTex(OP_SUSTP, imageTarget, tic, 0, {}, args);
-         st->tex.mask = TGSI_WRITEMASK_XY;
-         st->tex.format = getImageFormat(reinterpret_cast<TypeImage const*>(searchImage->second.type)->format);
-//         st->cache = tgsi.getCacheMode();
-      }
-      break;
    case spv::Op::OpImageQuerySize:
    case spv::Op::OpImageQuerySizeLod:
       {
