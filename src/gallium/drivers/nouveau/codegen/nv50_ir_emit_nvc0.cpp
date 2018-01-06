@@ -1390,7 +1390,7 @@ CodeEmitterNVC0::emitTXQ(const TexInstruction *i)
    code[1] = 0xc0000000;
 
    switch (i->tex.query) {
-   case TXQ_DIMS:            code[1] |= 0 << 22; break;
+   case TXQ_DIMS:            code[1] |= 1 << 20; break;
    case TXQ_TYPE:            code[1] |= 1 << 22; break;
    case TXQ_SAMPLE_POSITION: code[1] |= 2 << 22; break;
    case TXQ_FILTER:          code[1] |= 3 << 22; break;
