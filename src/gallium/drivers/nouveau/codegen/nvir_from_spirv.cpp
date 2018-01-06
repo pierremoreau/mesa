@@ -350,6 +350,9 @@ public:
    public:
       TypeSampler(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeSampler() {}
+      virtual unsigned int getSize(void) const override { return 8u; }
+      virtual enum DataType getEnumType(int isSigned = -1) const { return TYPE_U64; }
+      enum SpirvFile getStorageFile() const { return SpirvFile::TEMPORARY; }
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
 
       spv::Id id;
@@ -358,6 +361,9 @@ public:
    public:
       TypeImage(const spv_parsed_instruction_t *const parsedInstruction);
       virtual ~TypeImage() {}
+      virtual unsigned int getSize(void) const override { return 8u; }
+      virtual enum DataType getEnumType(int isSigned = -1) const { return TYPE_U64; }
+      enum SpirvFile getStorageFile() const { return SpirvFile::TEMPORARY; }
       virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { assert(false); return std::vector<Value *>(); }
 
       spv::Id id;
@@ -392,7 +398,7 @@ public:
    struct SampledImage {
       TypeSampledImage const* type;
       Value* image;
-      Sampler sampler;
+      Value* sampler;//Sampler sampler;
    };
    struct FunctionData {
       Function* caller;
@@ -2038,7 +2044,6 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          }
          if (paramType->getType() == spv::Op::OpTypeImage) {
             images.emplace(id, Image{ reinterpret_cast<const TypeImage*>(paramType) });
-            return SPV_SUCCESS;
          }
 
          SpirvFile destStorageFile = (paramType->getType() != spv::Op::OpTypePointer) ? SpirvFile::TEMPORARY : reinterpret_cast<const TypePointer *>(paramType)->getStorageFile();
@@ -3141,9 +3146,10 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          const Type *resType = types.find(parsedInstruction->type_id)->second;
          const spv::Id resId = parsedInstruction->result_id;
          const SpirVValue &image = getStructForOperand(2u);
+         const SpirVValue &sampler = getStructForOperand(3u);
          //const Sampler &sampler = samplers.find(getIdOfOperand(3u))->second;
 
-         sampledImages.emplace(resId, SampledImage{ reinterpret_cast<TypeSampledImage const*>(resType), nullptr, Sampler() });//image.value.front().value, sampler });
+         sampledImages.emplace(resId, SampledImage{ reinterpret_cast<TypeSampledImage const*>(resType), image.value.front().value, nullptr });//sampler.value.front().value });
       }
       break;
    case spv::Op::OpImageSampleExplicitLod:
@@ -3205,7 +3211,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          std::vector<Value*> resValue;
          for (auto &i : res)
             resValue.push_back(i.value);
-         // TODO
+
          auto const sampledImageType = reinterpret_cast<TypeSampledImage const*>(searchSampledImage->second.type);
          auto const imageTypeId = sampledImageType->getImageType();
          auto searchImageType = types.find(imageTypeId);
@@ -3226,6 +3232,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          ld->tex.levelZero = !specifyLod;
          ld->tex.mask = (1u << resValue.size()) - 1u;
          ld->tex.format = getImageFormat(reinterpret_cast<TypeImage const*>(searchImageType->second)->format);
+         ld->tex.rIndirectSrc = -1;
+         ld->tex.sIndirectSrc = -1;
+
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, searchType->second, res, { 1u } });
       }
       break;
@@ -3296,12 +3305,12 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             resValue.push_back(i.value);
 
          Value *lod = opcode == spv::Op::OpImageQuerySizeLod ? getOp(getIdOfOperand(3u)).value : mkImm(0x0);
-         std::vector<Value*> args = { lod, getScratch() };
+         std::vector<Value*> args = { lod };
          auto const tic = 0;
-         auto const tsc = 0;
-         auto ld = mkTex(OP_TXQ, imageTarget, tic, tsc, resValue, args);
+         auto ld = mkTex(OP_TXQ, imageTarget, tic, 0, resValue, args);
          ld->tex.mask = (1u << resValue.size()) - 1u;
          ld->tex.query = TexQuery::TXQ_DIMS;
+         ld->tex.rIndirectSrc = -1;
 
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, res, std::vector<uint32_t>(componentSize, res.size()) });
       }
