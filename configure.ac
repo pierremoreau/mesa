@@ -2386,6 +2386,16 @@ AM_CONDITIONAL(HAVE_CLOVER_ICD, test "x$enable_opencl_icd" = xyes)
 AC_SUBST([OPENCL_LIBNAME])
 AC_SUBST([CLANG_RESOURCE_DIR])
 
+AS_IF([test "x$enable_opencl" = xyes], [
+    PKG_CHECK_MODULES([SPIRV_TOOLS], [SPIRV-Tools >= 2018.0])])
+AC_SUBST([SPIRV_TOOLS_CFLAGS])
+AC_SUBST([SPIRV_TOOLS_LIBS])
+
+AS_IF([test "x$enable_opencl" = xyes], [
+    PKG_CHECK_MODULES([LLVM_SPIRV], [llvm-spirv])])
+AC_SUBST([LLVM_SPIRV_CFLAGS])
+AC_SUBST([LLVM_SPIRV_LIBS])
+
 dnl
 dnl Gallium configuration
 dnl

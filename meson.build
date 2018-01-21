@@ -596,10 +596,14 @@ if _opencl != 'disabled'
 
   # TODO: alitvec?
   dep_clc = dependency('libclc')
+  dep_spirv_tools = dependency('SPIRV-Tools', version : '>= 2018.0')
+  dep_llvm_spirv = dependency('llvm-spirv')
   with_gallium_opencl = true
   with_opencl_icd = _opencl == 'icd'
 else
   dep_clc = []
+  dep_spirv_tools = []
+  dep_llvm_spirv = []
   with_gallium_opencl = false
   with_gallium_icd = false
 endif
