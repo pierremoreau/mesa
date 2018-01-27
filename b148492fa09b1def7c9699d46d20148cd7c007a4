@@ -1,5 +1,0 @@
-v3
-* Remove unused variable “flag” (Francisco Jerez);
-* Rewrite the comment explaining why a library can’t be created using other
-  libraries, by mentioning the spec rather than saying it is hard (Francisco
-  Jerez).
