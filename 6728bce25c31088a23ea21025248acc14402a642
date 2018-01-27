@@ -1,0 +1,4 @@
+v3:
+* Fix inclusion of spirv.hpp11 to spirv.hpp;
+* Drop change to api/program.cpp for removing unused variable, as already taken
+  care of in patch 05.
