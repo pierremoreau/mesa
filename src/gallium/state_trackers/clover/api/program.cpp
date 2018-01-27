@@ -29,9 +29,10 @@
 using namespace clover;
 
 namespace {
-   void
+   ref_vector<device>
    validate_build_common(const program &prog, cl_uint num_devs,
                          const cl_device_id *d_devs,
+                         ref_vector<device> &valid_devs,
                          void (*pfn_notify)(cl_program, void *),
                          void *user_data) {
       if (!pfn_notify && user_data)
@@ -40,10 +41,16 @@ namespace {
       if (prog.kernel_ref_count())
          throw error(CL_INVALID_OPERATION);
 
+      if ((!d_devs && num_devs > 0u) || (d_devs && num_devs == 0u))
+         throw error(CL_INVALID_VALUE);
+
+      auto devs = (d_devs ? objs(d_devs, num_devs) : valid_devs);
       if (any_of([&](const device &dev) {
-               return !count(dev, prog.context().devices());
-            }, objs<allow_empty_tag>(d_devs, num_devs)))
+               return !count(dev, valid_devs);
+            }, devs))
          throw error(CL_INVALID_DEVICE);
+
+      return devs;
    }
 }
 
@@ -176,12 +183,11 @@ clBuildProgram(cl_program d_prog, cl_uint num_devs,
                void (*pfn_notify)(cl_program, void *),
                void *user_data) try {
    auto &prog = obj(d_prog);
-   auto devs = (d_devs ? objs(d_devs, num_devs) :
-                ref_vector<device>(prog.context().devices()));
+   auto valid_devs = ref_vector<device>(prog.devices());
+   auto devs = validate_build_common(prog, num_devs, d_devs, valid_devs,
+                                     pfn_notify, user_data);
    const auto opts = std::string(p_opts ? p_opts : "") + " " +
                      debug_get_option("CLOVER_EXTRA_BUILD_OPTIONS", "");
-
-   validate_build_common(prog, num_devs, d_devs, pfn_notify, user_data);
 
    if (prog.has_source) {
       prog.compile(devs, opts);
@@ -202,13 +208,12 @@ clCompileProgram(cl_program d_prog, cl_uint num_devs,
                  void (*pfn_notify)(cl_program, void *),
                  void *user_data) try {
    auto &prog = obj(d_prog);
-   auto devs = (d_devs ? objs(d_devs, num_devs) :
-                ref_vector<device>(prog.context().devices()));
+   auto valid_devs = ref_vector<device>(prog.devices());
+   auto devs = validate_build_common(prog, num_devs, d_devs, valid_devs,
+                                     pfn_notify, user_data);
    const auto opts = std::string(p_opts ? p_opts : "") + " " +
                      debug_get_option("CLOVER_EXTRA_COMPILE_OPTIONS", "");
    header_map headers;
-
-   validate_build_common(prog, num_devs, d_devs, pfn_notify, user_data);
 
    if (bool(num_headers) != bool(header_names))
       throw error(CL_INVALID_VALUE);
@@ -275,16 +280,18 @@ clLinkProgram(cl_context d_ctx, cl_uint num_devs, const cl_device_id *d_devs,
               const char *p_opts, cl_uint num_progs, const cl_program *d_progs,
               void (*pfn_notify) (cl_program, void *), void *user_data,
               cl_int *r_errcode) try {
+   if (num_progs == 0u || (num_progs != 0u && !d_progs))
+      throw error(CL_INVALID_VALUE);
+
    auto &ctx = obj(d_ctx);
    const auto opts = std::string(p_opts ? p_opts : "") + " " +
                      debug_get_option("CLOVER_EXTRA_LINK_OPTIONS", "");
    auto progs = objs(d_progs, num_progs);
    auto prog = create<program>(ctx);
-   auto devs = validate_link_devices(progs,
-                                     (d_devs ? objs(d_devs, num_devs) :
-                                      ref_vector<device>(ctx.devices())));
-
-   validate_build_common(prog, num_devs, d_devs, pfn_notify, user_data);
+   auto valid_devs = ref_vector<device>(ctx.devices());
+   auto devs = validate_build_common(prog, num_devs, d_devs, valid_devs,
+                                     pfn_notify, user_data);
+   devs = validate_link_devices(progs, devs);
 
    try {
       prog().link(devs, opts, progs);
