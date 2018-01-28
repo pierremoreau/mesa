@@ -1,0 +1,7 @@
+v3:
+* Move to SPIR-V being canonical IR;
+* Only convert to CPU endianness in process_program, rather than doing it twice
+  (Francisco Jerez);
+* Replace pointer + length for storing the IL to a std::vector<char> (Francisco
+  Jerez);
+* Change some interfaces to accept the previously mentioned vector.
