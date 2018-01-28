@@ -1,0 +1,1 @@
+v3: Use as_vector instead of as_pointer (Francisco Jerez)
