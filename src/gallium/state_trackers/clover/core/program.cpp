@@ -22,6 +22,7 @@
 
 #include "core/program.hpp"
 #include "llvm/invocation.hpp"
+#include "spirv/invocation.hpp"
 
 using namespace clover;
 
@@ -52,8 +53,9 @@ program::compile(const ref_vector<device> &devs, const std::string &opts,
 
          try {
             assert(dev.ir_format() == PIPE_SHADER_IR_NATIVE);
-            const module m = llvm::compile_program(_source, headers,
-                                                   dev.ir_target(), opts, log);
+            const module m = use_spirv_as_ir() ?
+               llvm::compile_to_spirv(_source, headers, dev, opts, log) :
+               llvm::compile_program(_source, headers, dev.ir_target(), opts, log);
             _builds[&dev] = { m, opts, log };
          } catch (...) {
             _builds[&dev] = { module(), opts, log };
@@ -76,8 +78,9 @@ program::link(const ref_vector<device> &devs, const std::string &opts,
 
       try {
          assert(dev.ir_format() == PIPE_SHADER_IR_NATIVE);
-         const module m = llvm::link_program(ms, dev.ir_format(),
-                                             dev.ir_target(), opts, log);
+         const module m = use_spirv_as_ir() ?
+            spirv::link_program(ms, dev, opts, log) :
+            llvm::link_program(ms, dev.ir_format(), dev.ir_target(), opts, log);
          _builds[&dev] = { m, opts, log };
       } catch (...) {
          _builds[&dev] = { module(), opts, log };

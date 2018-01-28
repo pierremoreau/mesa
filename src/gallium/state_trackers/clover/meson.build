@@ -48,7 +48,7 @@ libclllvm = static_library(
       dep_llvm.get_configtool_variable('version'), 'include',
     )),
   ],
-  dependencies : [dep_llvm, dep_elf],
+  dependencies : [dep_llvm, dep_elf, dep_llvm_spirv],
 )
 
 libclspirv = static_library(
@@ -56,7 +56,7 @@ libclspirv = static_library(
   files('spirv/invocation.cpp', 'spirv/invocation.hpp'),
   include_directories : clover_incs,
   cpp_args : [cpp_vis_args],
-  dependencies : [dep_spirv_tools, dep_llvm_spirv],
+  dependencies : [dep_spirv_tools],
 )
 
 clover_files = files(

@@ -34,11 +34,11 @@
 #include "core/error.hpp"
 #include "core/platform.hpp"
 #include "invocation.hpp"
+#include "llvm/invocation.hpp"
 #include "llvm/util.hpp"
 #include "pipe/p_state.h"
 #include "util/algorithm.hpp"
 #include "util/functional.hpp"
-#include "util/u_debug.h"
 #include "util/u_math.h"
 
 #include "spirv.hpp"
@@ -567,7 +567,8 @@ clover::spirv::process_program(const std::vector<char> &binary,
 
 module
 clover::spirv::link_program(const std::vector<module> &modules,
-                            const std::string &opts, std::string &r_log) {
+                            const device &dev, const std::string &opts,
+                            std::string &r_log) {
    std::vector<std::string> options = clover::llvm::tokenize(opts);
 
    spvtools::LinkerOptions linker_options;
@@ -644,6 +645,13 @@ clover::spirv::link_program(const std::vector<module> &modules,
 
    if (!spvTool.Validate(linked_binary.data(), linked_binary.size()))
       throw build_error();
+
+   if (create_library && !use_spirv_as_ir()) {
+      const std::vector<char> char_binary(
+            reinterpret_cast<char *>(linked_binary.data()),
+            reinterpret_cast<char *>(linked_binary.data() + linked_binary.size()));
+      return llvm::compile_from_spirv(char_binary, dev, r_log);
+   }
 
    for (const auto &mod : modules)
       m.syms.insert(m.syms.end(), mod.syms.begin(), mod.syms.end());

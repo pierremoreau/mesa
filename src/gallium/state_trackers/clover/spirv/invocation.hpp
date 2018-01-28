@@ -24,6 +24,8 @@
 #define CLOVER_SPIRV_INVOCATION_HPP
 
 #include "core/module.hpp"
+#include "core/program.hpp"
+#include "util/u_debug.h"
 
 namespace clover {
    namespace spirv {
@@ -41,8 +43,13 @@ namespace clover {
 
       // Combines multiple clover modules into a single one, resolving
       // link dependencies between them.
-      module link_program(const std::vector<module> &modules,
+      module link_program(const std::vector<module> &modules, const device &dev,
                           const std::string &opts, std::string &r_log);
+   }
+
+   inline bool
+   use_spirv_as_ir() {
+      return debug_get_bool_option("CLOVER_USE_SPIRV", false);
    }
 }
 
