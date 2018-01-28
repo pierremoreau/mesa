@@ -1,0 +1,1 @@
+v3: Advertise cl_khr_il_program if IR is LLVM or NATIVE.
