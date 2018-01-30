@@ -1,0 +1,3 @@
+v3:
+* Add missing brace in commit message;
+* Use the proper set of devices when d_devs is NULL (Francisco Jerez).

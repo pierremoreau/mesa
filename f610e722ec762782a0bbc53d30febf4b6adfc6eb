@@ -1,0 +1,3 @@
+v3:
+* Throw exception if SPIR-V is not supported (Francisco Jerez);
+* Check for cl_khr_il_program support instead of PIPE_SHADER_IR_SPIRV.
