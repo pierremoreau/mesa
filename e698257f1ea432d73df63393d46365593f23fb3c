@@ -1,0 +1,5 @@
+v3:
+* Update `supports_ir()` to take an `enum pipe_shader_ir` instead of an int
+  (Francisco Jerez)
+* Remove `supported_irs()` from “device.cpp” and inline its code directly into
+  `supports_ir()` (Francisco Jerez)
