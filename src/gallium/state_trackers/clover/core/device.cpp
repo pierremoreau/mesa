@@ -277,7 +277,8 @@ device::supports_ir(enum pipe_shader_ir ir) const {
 
 std::string
 device::supported_extensions() const {
-   const bool supports_il_program = supports_ir(PIPE_SHADER_IR_NATIVE);
+   const bool supports_il_program = supports_ir(PIPE_SHADER_IR_NATIVE) ||
+                                    supports_ir(PIPE_SHADER_IR_SPIRV);
    return
       "cl_khr_byte_addressable_store"
       " cl_khr_global_int32_base_atomics"

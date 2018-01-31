@@ -32,10 +32,10 @@ namespace {
                    const std::string &opts, const header_map &headers,
                    std::string &log) {
       if (!prog.source().empty())
-         return use_spirv_as_ir() ?
+         return (use_spirv_as_ir() || dev.ir_format() == PIPE_SHADER_IR_SPIRV) ?
             llvm::compile_to_spirv(prog.source(), headers, dev, opts, log) :
             llvm::compile_program(prog.source(), headers, dev.ir_target(), opts, log);
-      else if (use_spirv_as_ir())
+      else if (use_spirv_as_ir() || dev.ir_format() == PIPE_SHADER_IR_SPIRV)
          return spirv::process_program(prog.il(), dev, log);
       else
          throw error(CL_INVALID_VALUE);
@@ -73,7 +73,8 @@ program::compile(const ref_vector<device> &devs, const std::string &opts,
          std::string log;
 
          try {
-            assert(dev.ir_format() == PIPE_SHADER_IR_NATIVE);
+            assert(dev.ir_format() == PIPE_SHADER_IR_NATIVE ||
+                   dev.ir_format() == PIPE_SHADER_IR_SPIRV);
             _builds[&dev] = { compile_program(*this, dev, opts, headers, log),
                opts, log };
          } catch (...) {
@@ -96,8 +97,9 @@ program::link(const ref_vector<device> &devs, const std::string &opts,
       std::string log = _builds[&dev].log;
 
       try {
-         assert(dev.ir_format() == PIPE_SHADER_IR_NATIVE);
-         const module m = use_spirv_as_ir() ?
+         assert(dev.ir_format() == PIPE_SHADER_IR_NATIVE ||
+                dev.ir_format() == PIPE_SHADER_IR_SPIRV);
+         const module m = (use_spirv_as_ir() || dev.ir_format() == PIPE_SHADER_IR_SPIRV) ?
             spirv::link_program(ms, dev, opts, log) :
             llvm::link_program(ms, dev.ir_format(), dev.ir_target(), opts, log);
          _builds[&dev] = { m, opts, log };

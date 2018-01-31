@@ -646,7 +646,7 @@ clover::spirv::link_program(const std::vector<module> &modules,
    if (!spvTool.Validate(linked_binary.data(), linked_binary.size()))
       throw build_error();
 
-   if (create_library && !use_spirv_as_ir()) {
+   if (create_library && (!use_spirv_as_ir() && dev.ir_format() != PIPE_SHADER_IR_SPIRV)) {
       const std::vector<char> char_binary(
             reinterpret_cast<char *>(linked_binary.data()),
             reinterpret_cast<char *>(linked_binary.data() + linked_binary.size()));
