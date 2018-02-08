@@ -111,5 +111,6 @@ libclover = static_library(
   clover_files,
   include_directories : clover_incs,
   cpp_args : [clover_cpp_args, cpp_vis_args],
+  dependencies : [dep_spirv_tools],
   link_with : [libclllvm],
 )
