@@ -259,7 +259,7 @@ clover::llvm::compile_to_spirv(const std::string &source,
 
    std::stringstream ss;
    ::llvm::raw_os_ostream out(ss);
-   if (!::llvm::WriteSPIRV(mod.get(), ss, error_msg)) {
+   if (!::llvm::WriteSPIRV(mod.get(), out, error_msg)) {
       r_log += "Translation from LLVM IR to SPIR-V failed: " + error_msg + ".\n";
       throw error(CL_INVALID_VALUE);
    }
