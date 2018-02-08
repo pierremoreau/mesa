@@ -41,6 +41,10 @@ namespace clover {
                           const std::string &target,
                           const std::string &opts,
                           std::string &r_log);
+
+      module compile_from_spirv(const std::vector<char> &binary,
+                                const device &dev,
+                                std::string &r_log);
    }
 }
 

@@ -24,12 +24,15 @@
 // OTHER DEALINGS IN THE SOFTWARE.
 //
 
+#include <sstream>
+
 #include <llvm/IR/DiagnosticPrinter.h>
 #include <llvm/IR/DiagnosticInfo.h>
 #include <llvm/IR/LLVMContext.h>
 #include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm-c/Target.h>
+#include <llvm-spirv/SPIRV.h>
 
 #include <clang/CodeGen/CodeGenAction.h>
 #include <clang/Lex/PreprocessorOptions.h>
@@ -300,4 +303,27 @@ clover::llvm::link_program(const std::vector<module> &modules,
    } else {
       unreachable("Unsupported IR.");
    }
+}
+
+module
+clover::llvm::compile_from_spirv(const std::vector<char> &binary,
+                                 const device &dev,
+                                 std::string &r_log) {
+   auto ctx = create_context(r_log);
+
+   ::llvm::Module *unsafe_mod;
+   std::string error_msg;
+   std::stringstream input(std::ios_base::binary);
+   std::copy(binary.begin(), binary.end(), std::ostream_iterator<char>(input, ""));
+   if (!::llvm::ReadSPIRV(*ctx, input, unsafe_mod, error_msg)) {
+      r_log += "Failed to convert SPIR-V to LLVM IR: " + error_msg + ".\n";
+      throw error(CL_INVALID_VALUE);
+   }
+
+   std::unique_ptr<::llvm::Module> mod(unsafe_mod);
+
+   if (has_flag(debug::llvm))
+      debug::log(".ll", print_module_bitcode(*mod));
+
+   return build_module_library(*mod, module::section::text_intermediate);
 }
