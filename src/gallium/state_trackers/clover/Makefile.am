@@ -46,10 +46,14 @@ libclllvm_la_SOURCES = $(LLVM_SOURCES)
 libclover_la_CXXFLAGS = \
 	$(CXX11_CXXFLAGS) \
 	$(CLOVER_STD_OVERRIDE) \
-	$(VISIBILITY_CXXFLAGS)
+	$(VISIBILITY_CXXFLAGS) \
+	$(SPIRV_TOOLS_CFLAGS)
 
 libclover_la_LIBADD = \
 	libclllvm.la
+
+libclover_la_LDFLAGS = \
+	$(SPIRV_TOOLS_LIBS)
 
 libclover_la_SOURCES = $(CPP_SOURCES)
 

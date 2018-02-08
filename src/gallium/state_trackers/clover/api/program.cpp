@@ -21,8 +21,14 @@
 //
 
 #include "api/util.hpp"
+#include "compiler/spirv/spirv.h"
 #include "core/program.hpp"
+#include "util/u_math.h"
 #include "util/u_debug.h"
+
+#ifdef CLOVER_ALLOW_SPIRV
+#include <spirv-tools/libspirv.hpp>
+#endif
 
 #include <sstream>
 
@@ -45,6 +51,60 @@ namespace {
                return !count(dev, valid_devs);
             }, objs<allow_empty_tag>(d_devs, num_devs)))
          throw error(CL_INVALID_DEVICE);
+   }
+
+#ifdef CLOVER_ALLOW_SPIRV
+   bool
+   is_valid_spirv(const uint32_t *binary, size_t length,
+                  const context::notify_action &notify) {
+      auto const validator_consumer = [&notify](spv_message_level_t level,
+                                               const char * /* source */,
+                                               const spv_position_t &position,
+                                               const char *message) {
+         if (!notify)
+            return;
+
+         std::string str_level;
+         switch (level) {
+#define LVL2STR(lvl) case SPV_MSG_##lvl: str_level = std::string(#lvl)
+            LVL2STR(FATAL);
+            LVL2STR(INTERNAL_ERROR);
+            LVL2STR(ERROR);
+            LVL2STR(WARNING);
+            LVL2STR(INFO);
+            LVL2STR(DEBUG);
+#undef LVL2STR
+         }
+         const std::string log = "[" + str_level + "] At word No." +
+                                 std::to_string(position.index) + ": \"" +
+                                 message + "\"";
+         notify(log.c_str());
+      };
+
+      spvtools::SpirvTools spvTool(SPV_ENV_OPENCL_1_2);
+      spvTool.SetMessageConsumer(validator_consumer);
+
+      return spvTool.Validate(binary, length);
+   }
+#endif
+
+   enum program::il_type
+   identify_and_validate_il(const void *il, size_t length,
+                            const context::notify_action &notify) {
+
+      enum program::il_type il_type = program::il_type::none;
+
+#ifdef CLOVER_ALLOW_SPIRV
+      const uint32_t *stream = reinterpret_cast<const uint32_t*>(il);
+      if (stream[0] == SpvMagicNumber ||
+         util_bswap32(stream[0]) == SpvMagicNumber) {
+         if (!is_valid_spirv(stream, length / 4u, notify))
+            throw error(CL_INVALID_VALUE);
+         il_type = program::il_type::spirv;
+      }
+#endif
+
+      return il_type;
    }
 }
 
@@ -129,6 +189,29 @@ clCreateProgramWithBinary(cl_context d_ctx, cl_uint n,
    return NULL;
 }
 
+cl_program
+clover::CreateProgramWithILKHR(cl_context d_ctx, const void *il,
+                               size_t length, cl_int *r_errcode) try {
+   auto &ctx = obj(d_ctx);
+
+   if (!il || !length)
+      throw error(CL_INVALID_VALUE);
+
+   const enum program::il_type il_type = identify_and_validate_il(il, length,
+                                                                  ctx.notify);
+
+   if (il_type == program::il_type::none)
+      throw error(CL_INVALID_VALUE);
+
+   // Initialize a program object with it.
+   ret_error(r_errcode, CL_SUCCESS);
+   return new program(ctx, reinterpret_cast<const char*>(il), length, il_type);
+
+} catch (error &e) {
+   ret_error(r_errcode, e);
+   return NULL;
+}
+
 CLOVER_API cl_program
 clCreateProgramWithBuiltInKernels(cl_context d_ctx, cl_uint n,
                                   const cl_device_id *d_devs,
@@ -185,7 +268,7 @@ clBuildProgram(cl_program d_prog, cl_uint num_devs,
    validate_build_common(prog, num_devs, d_devs, valid_devs, pfn_notify,
                          user_data);
 
-   if (prog.has_source) {
+   if (prog.has_source || prog.has_il) {
       prog.compile(devs, opts);
       prog.link(devs, opts, { prog });
    } else if (any_of([&](const device &dev){
@@ -223,7 +306,7 @@ clCompileProgram(cl_program d_prog, cl_uint num_devs,
    if (bool(num_headers) != bool(header_names))
       throw error(CL_INVALID_VALUE);
 
-   if (!prog.has_source)
+   if (!prog.has_source && !prog.has_il)
       throw error(CL_INVALID_OPERATION);
 
    for_each([&](const char *name, const program &header) {
