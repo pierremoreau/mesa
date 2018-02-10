@@ -59,7 +59,8 @@ T getOperand(const spv_parsed_instruction_t *parsedInstruction, uint16_t operand
 
    const spv_parsed_operand_t& parsedOperand = parsedInstruction->operands[operandIndex];
    T value;
-   std::memcpy(&value, parsedInstruction->words + parsedOperand.offset, parsedOperand.num_words * sizeof(word));
+   assert(sizeof(T) <= parsedOperand.num_words * sizeof(word));
+   std::memcpy(&value, parsedInstruction->words + parsedOperand.offset, sizeof(T));
 
    return value;
 }
