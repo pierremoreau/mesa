@@ -23,12 +23,9 @@
 #include "api/util.hpp"
 #include "compiler/spirv/spirv.h"
 #include "core/program.hpp"
+#include "spirv/invocation.hpp"
 #include "util/u_math.h"
 #include "util/u_debug.h"
-
-#ifdef CLOVER_ALLOW_SPIRV
-#include <spirv-tools/libspirv.hpp>
-#endif
 
 #include <sstream>
 
@@ -52,42 +49,6 @@ namespace {
             }, objs<allow_empty_tag>(d_devs, num_devs)))
          throw error(CL_INVALID_DEVICE);
    }
-
-#ifdef CLOVER_ALLOW_SPIRV
-   bool
-   is_valid_spirv(const uint32_t *binary, size_t length,
-                  const context::notify_action &notify) {
-      auto const validator_consumer = [&notify](spv_message_level_t level,
-                                               const char * /* source */,
-                                               const spv_position_t &position,
-                                               const char *message) {
-         if (!notify)
-            return;
-
-         std::string str_level;
-         switch (level) {
-#define LVL2STR(lvl) case SPV_MSG_##lvl: str_level = std::string(#lvl)
-            LVL2STR(FATAL);
-            LVL2STR(INTERNAL_ERROR);
-            LVL2STR(ERROR);
-            LVL2STR(WARNING);
-            LVL2STR(INFO);
-            LVL2STR(DEBUG);
-#undef LVL2STR
-         }
-         const std::string log = "[" + str_level + "] At word No." +
-                                 std::to_string(position.index) + ": \"" +
-                                 message + "\"";
-         notify(log.c_str());
-      };
-
-      spvtools::SpirvTools spvTool(SPV_ENV_OPENCL_1_2);
-      spvTool.SetMessageConsumer(validator_consumer);
-
-      return spvTool.Validate(binary, length);
-   }
-#endif
-
    enum program::il_type
    identify_and_validate_il(const void *il, size_t length,
                             const context::notify_action &notify) {
@@ -98,7 +59,7 @@ namespace {
       const uint32_t *stream = reinterpret_cast<const uint32_t*>(il);
       if (stream[0] == SpvMagicNumber ||
          util_bswap32(stream[0]) == SpvMagicNumber) {
-         if (!is_valid_spirv(stream, length / 4u, notify))
+         if (!spirv::is_valid_spirv(stream, length / 4u, notify))
             throw error(CL_INVALID_VALUE);
          il_type = program::il_type::spirv;
       }
