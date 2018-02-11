@@ -2402,6 +2402,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          bb = nullptr;
       }
       break;
+   case spv::Op::OpLifetimeStart: // FALLTHROUGH
+   case spv::Op::OpLifetimeStop:
+      break;
    case spv::Op::OpLoad:
       {
          auto typeId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
