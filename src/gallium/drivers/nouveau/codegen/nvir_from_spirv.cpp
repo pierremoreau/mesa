@@ -1553,8 +1553,7 @@ Converter::convertType<Converter::TypeArray>(const spv_parsed_instruction_t *par
 template<> spv_result_t
 Converter::convertType<Converter::TypePointer>(const spv_parsed_instruction_t *parsedInstruction)
 {
-   auto *type = new TypePointer(parsedInstruction,
-         info->target, types);
+   auto *type = new TypePointer(parsedInstruction, info->target, types);
    types.emplace(type->id, type);
 
    return SPV_SUCCESS;
@@ -1746,6 +1745,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
 
    const spv::Op opcode = static_cast<spv::Op>(parsedInstruction->opcode);
    switch (opcode) {
+   // TODO(pmoreau): Rework this
    case spv::Op::OpCapability:
       {
          using Cap = spv::Capability;
@@ -2710,7 +2710,7 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             assert(size->second.storageFile == SpirvFile::IMMEDIATE);
             sizeImm = (info->target < 0xc0) ? size->second.value[0u].value->reg.data.u32 : size->second.value[0u].value->reg.data.u64;
          } else {
-            sizeImm == reinterpret_cast<const TypePointer *>(target->second.type)->getPointedType()->getSize();
+            sizeImm = reinterpret_cast<const TypePointer *>(target->second.type)->getPointedType()->getSize();
          }
          const auto targetStorage = target->second.storageFile;
          const auto sourceStorage = source->second.storageFile;
