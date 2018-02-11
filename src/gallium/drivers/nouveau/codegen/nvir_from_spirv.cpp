@@ -1434,7 +1434,7 @@ Converter::getStorageFile(spv::StorageClass storage)
    case spv::StorageClass::AtomicCounter: // FALLTHROUGH
    case spv::StorageClass::Image: // FALLTHROUGH
    default:
-      _debug_printf("StorageClass %u isn't supported yet\n");
+      debug_printf("StorageClass %u isn't supported yet\n", storage);
       assert(false);
       return SpirvFile::NONE;
    }
@@ -1468,7 +1468,8 @@ bool
 Converter::run()
 {
    if (info->dbgFlags)
-      _debug_printf("Compiling for nv%02x\n", info->target);
+      pipe_debug_message(info->debug, SHADER_INFO,
+                         "Compiling for nv%02x\n", info->target);
 
    // TODO try to remove/get around that main function
    BasicBlock *entry = new BasicBlock(prog->main);
@@ -1768,7 +1769,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       {
          const char *setName = spirv::getOperand<const char*>(parsedInstruction, 1u);
          if (std::strcmp(setName, "OpenCL.std")) {
-            _debug_printf("Extended instruction set \"%s\" is unsupported\n", setName);
+            pipe_debug_message(info->debug, ERROR,
+                               "Unsupported extended instruction set \"%s\"\n",
+                               setName);
             return SPV_UNSUPPORTED;
          }
       }
@@ -1783,7 +1786,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          case SPV_EXT_INST_TYPE_OPENCL_STD:
             return convertOpenCLInstruction(id, type, static_cast<OpenCLLIB::Entrypoints>(extensionOpcode), parsedInstruction);
          default:
-            _debug_printf("Unsupported SPV_EXT_INST_TYPE %u\n", parsedInstruction->ext_inst_type);
+            pipe_debug_message(info->debug, ERROR,
+                               "Unsupported SPV_EXT_INST_TYPE %u\n",
+                               parsedInstruction->ext_inst_type);
             return SPV_UNSUPPORTED;
          }
       }
@@ -1799,7 +1804,9 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       {
          const spv::Id entryPointId = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
          const spv::ExecutionMode executionMode = spirv::getOperand<spv::ExecutionMode>(parsedInstruction, 1u);
-         _debug_printf("Ignoring unsupported execution mode %u for entry point %u\n", executionMode, entryPointId);
+         pipe_debug_message(info->debug, INFO,
+                            "Ignoring unsupported execution mode %u for entry point %u\n",
+                            executionMode, entryPointId);
       }
       break;
    case spv::Op::OpName:
@@ -1815,7 +1822,8 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
    case spv::Op::OpDecorate:
       return convertDecorate(parsedInstruction);
    case spv::Op::OpMemberDecorate:
-      _debug_printf("OpMemberDecorate is unsupported.\n");
+      pipe_debug_message(info->debug, ERROR,
+                         "OpMemberDecorate is unsupported.\n");
       return SPV_UNSUPPORTED;
    case spv::Op::OpDecorationGroup:
       break;
