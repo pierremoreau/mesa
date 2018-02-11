@@ -1478,7 +1478,7 @@ Converter::run()
 
    const unsigned int numWords = info->bin.sourceLength / 4u;
 
-   spv_context context = spvContextCreate(SPV_ENV_OPENCL_2_1);
+   spv_context context = spvContextCreate(SPV_ENV_OPENCL_1_2);
    spv_diagnostic diag = nullptr;
    const spv_result_t res = spvBinaryParse(context, this, binary, numWords,
          nullptr, handleInstruction, &diag);
