@@ -455,7 +455,7 @@ private:
    void store(SpirvFile dstFile, const std::vector<PValue> &ptrs, unsigned int offset, std::vector<PValue> const& values, Type const* type, spv::MemoryAccessMask access = spv::MemoryAccessMask::MaskNone, uint32_t alignment = 0u);
 
    struct nv50_ir_prog_info *info;
-   const char *const binary;
+   const uint32_t *const binary;
    spv::AddressingModel addressingModel;
    spv::MemoryModel memoryModel;
    std::unordered_map<spv::Id, EntryPoint> entryPoints;
@@ -1396,7 +1396,7 @@ Converter::store(SpirvFile dstFile, const std::vector<PValue> &ptrs, unsigned in
 }
 
 Converter::Converter(Program *prog, struct nv50_ir_prog_info *info) : BuildUtil(prog),
-   info(info), binary(reinterpret_cast<const char *const>(info->bin.source)),
+   info(info), binary(reinterpret_cast<const uint32_t *const>(info->bin.source)),
    addressingModel(), memoryModel(), entryPoints(), decorations(), types(),
    functions(), blocks(), phiNodes(), phiMapping(), phiToMatch(),
    samplers(), sampledImages(), spvValues(), currentFuncId(0u),
@@ -1487,8 +1487,7 @@ Converter::run()
 
    spv_context context = spvContextCreate(SPV_ENV_OPENCL_2_1);
    spv_diagnostic diag = nullptr;
-   const spv_result_t res = spvBinaryParse(context, this,
-         reinterpret_cast<const uint32_t*>(binary), numWords,
+   const spv_result_t res = spvBinaryParse(context, this, binary, numWords,
          nullptr, handleInstruction, &diag);
    if (res != SPV_SUCCESS) {
       _debug_printf("Failed to parse the SPIR-V binary:\n");
