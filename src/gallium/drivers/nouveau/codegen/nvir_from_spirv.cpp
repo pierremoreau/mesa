@@ -625,7 +625,6 @@ Converter::TypeInt::generateConstant(Converter &conv, const spv_parsed_instructi
       imm = generateImmediate<uint64_t>(conv, parsedInstruction, operandIndex);
       break;
    default:
-      _debug_printf("Unsupported integer type.\n");
       assert(false);
       return { nullptr };
    }
@@ -654,7 +653,6 @@ Converter::TypeInt::getEnumType(int isSigned) const
       else if (width == 64u)
          return DataType::TYPE_S64;
       else {
-         _debug_printf("TypeInt has a non valid width of %u bits\n", width);
          assert(false);
          return DataType::TYPE_NONE;
       }
@@ -669,7 +667,6 @@ Converter::TypeInt::getEnumType(int isSigned) const
       else if (width == 64u)
          return DataType::TYPE_U64;
       else {
-         _debug_printf("TypeInt has a non valid width of %u bits\n", width);
          assert(false);
          return DataType::TYPE_NONE;
       }
@@ -722,7 +719,6 @@ Converter::TypeFloat::getEnumType(int /*isSigned*/) const
    else if (width == 64u)
       return DataType::TYPE_F64;
    else {
-      _debug_printf("TypeFloat has a non valid width of %u bits\n", width);
       assert(false);
       return DataType::TYPE_NONE;
    }
@@ -844,10 +840,8 @@ Converter::TypeStruct::getGlobalOffset(BuildUtil *bu, Decoration const& decorati
       bu->loadImm(res, structOff);
    bu->mkOp2(OP_ADD, offset->reg.type, offset, offset, res);
 
-   if (position + 1u < ids.size()) {
-      _debug_printf("Trying to dereference basic types\n");
+   if (position + 1u < ids.size())
       assert(false);
-   }
 }
 
 Converter::TypeVector::TypeVector(const spv_parsed_instruction_t *const parsedInstruction,
@@ -940,10 +934,8 @@ Converter::TypeVector::getGlobalOffset(BuildUtil *bu, Decoration const& decorati
    bu->mkMov(index, ids[position], offset->reg.type);
    bu->mkOp3(OP_MAD, offset->reg.type, offset, index, res, offset);
 
-   if (position + 1u < ids.size()) {
-      _debug_printf("Trying to dereference basic types\n");
+   if (position + 1u < ids.size())
       assert(false);
-   }
 }
 
 std::vector<unsigned int>
