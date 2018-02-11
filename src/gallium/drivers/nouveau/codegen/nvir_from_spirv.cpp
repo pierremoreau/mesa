@@ -387,6 +387,12 @@ public:
       spv::Id id;
       spv::Id imageType;
    };
+   class TypeEvent : public Type {
+   public:
+      TypeEvent(const spv_parsed_instruction_t *const parsedInstruction);
+      virtual ~TypeEvent() {}
+      virtual std::vector<Value *> generateNullConstant(Converter &conv) const override { return { nullptr }; }
+   };
    struct Sampler {
       TypeSampler const* type;
       uint32_t index;
@@ -1141,6 +1147,11 @@ Converter::TypeImage::TypeImage(const spv_parsed_instruction_t *const parsedInst
    alignment = 0u;
 }
 
+Converter::TypeEvent::TypeEvent(const spv_parsed_instruction_t *const parsedInstruction) : Type(spv::Op::OpTypeEvent)
+{
+   id = spirv::getOperand<spv::Id>(parsedInstruction, 0u);
+}
+
 Value *
 Converter::acquire(SpirvFile dstFile, Type const* type)
 {
@@ -1862,6 +1873,8 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
       return convertType<TypeImage>(parsedInstruction);
    case spv::Op::OpTypeSampledImage:
       return convertType<TypeSampledImage>(parsedInstruction);
+   case spv::Op::OpTypeEvent:
+      return convertType<TypeEvent>(parsedInstruction);
    case spv::Op::OpConstant:
       {
          const Type *resType = types.find(parsedInstruction->type_id)->second;
@@ -1958,6 +1971,10 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             if (storageFile == SpirvFile::CONST && init.storageFile == SpirvFile::IMMEDIATE)
                storageFile = SpirvFile::IMMEDIATE;
             spvValues.emplace(resId, SpirVValue{ storageFile, resType, init.value, init.paddings });
+         } else if (resType->type == spv::Op::OpTypePointer &&
+                    reinterpret_cast<const TypePointer*>(resType)->getPointedType()->type == spv::Op::OpTypeEvent) {
+            assert(storageFile == SpirvFile::TEMPORARY);
+            spvValues.emplace(resId, SpirVValue{ SpirvFile::NONE, resType, { nullptr }, { } });
          } else if (!isBuiltIn) {
             acquire(storageFile, resId, resType);
          }
@@ -2465,6 +2482,10 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
             _debug_printf("Couldn't find object with id %u\n", objectId);
             return SPV_ERROR_INVALID_LOOKUP;
          }
+
+         // TODO(pmoreau): this is a hack as TypeEvent is not a physical value
+         if (pointerType->getPointedType()->type == spv::Op::OpTypeEvent)
+            return SPV_SUCCESS;
 
          auto value = searchElementStruct->second.value;
          store(pointerType->getStorageFile(), searchPointer->second.value, 0u, value, pointerType->getPointedType(), access, alignment);
@@ -3354,6 +3375,135 @@ Converter::convertInstruction(const spv_parsed_instruction_t *parsedInstruction)
          }
 
          spvValues.emplace(resId, SpirVValue{ SpirvFile::TEMPORARY, resType, values, resType->getPaddings() });
+      }
+      break;
+   // TODO(pmoreau):
+   // * Fix handling of events
+   // * Fix handling of vectors
+   case spv::Op::OpGroupAsyncCopy:
+      {
+         const Type *resType = types.find(parsedInstruction->type_id)->second;
+         const spv::Id resId = parsedInstruction->result_id;
+
+         const SpirVValue &dst = getStructForOperand(3u);
+         const SpirVValue &src = getStructForOperand(4u);
+
+         Value *numElements = getOp(getIdOfOperand(5u)).value;
+         mkMov(numElements, mkImm(0x1), TYPE_U64);
+         Value *stride = getOp(getIdOfOperand(6u)).value;
+
+         uint32_t regSize = numElements->reg.size;
+         DataType regType = (info->target < 0xc0) ? TYPE_U32 : TYPE_U64;
+
+         const PValue &srcPtr = src.value[0u];
+         Symbol *srcSym = srcPtr.symbol;
+         if (srcSym == nullptr)
+            srcSym = createSymbol(src.storageFile, regType, regSize, 0u);
+
+         const PValue &dstPtr = dst.value[0u];
+         Symbol *dstSym = dstPtr.symbol;
+         if (dstSym == nullptr)
+            dstSym = createSymbol(dst.storageFile, regType, regSize, 0u);
+
+         const DataType typeEnum = reinterpret_cast<const TypePointer*>(dst.type)->getPointedType()->getEnumType();
+         const uint32_t typeSize = reinterpret_cast<const TypePointer*>(dst.type)->getPointedType()->getSize();
+         Value *typeSizeImm = getScratch(regSize);
+         mkMov(typeSizeImm, mkImm(typeSize), regType);
+
+         Value *srcDelta = getScratch(regSize);
+         Value *dstDelta = getScratch(regSize);
+         if (dst.storageFile == SpirvFile::GLOBAL) {
+            mkMov(srcDelta, stride,     regType);
+            mkMov(dstDelta, mkImm(0x1), regType);
+         } else {
+            mkMov(srcDelta, mkImm(0x1), regType);
+            mkMov(dstDelta, stride,     regType);
+         }
+
+         auto getSysVal = [this](SVSemantic svName, uint32_t index){
+            return mkOp1v(OP_RDSV, TYPE_U32, getScratch(), mkSysVal(svName, index));
+         };
+
+         Value *tid = getScratch(4u);
+         mkMov(tid, getSysVal(SV_TID, 0u), TYPE_U32);
+         //mkOp3(OP_MAD, TYPE_U32, tid, getSysVal(SV_NTID, 1u), getSysVal(SV_TID, 2u), getSysVal(SV_TID, 1u));
+         //mkOp3(OP_MAD, TYPE_U32, tid, getSysVal(SV_NTID, 0u), tid, getSysVal(SV_TID, 0u));
+         if (regSize == 8u) {
+            Value *tmp = getScratch(8u);
+            mkCvt(OP_CVT, TYPE_U64, tmp, TYPE_U32, tid);
+            tid = tmp;
+         }
+         Value *blockSize = getScratch(4u);
+         mkMov(blockSize, getSysVal(SV_NTID, 0u), TYPE_U32);
+         //mkOp2(OP_MUL, TYPE_U32, blockSize, getSysVal(SV_NTID, 0u), getSysVal(SV_NTID, 1u));
+         //mkOp2(OP_MUL, TYPE_U32, blockSize, blockSize, getSysVal(SV_NTID, 2u));
+         if (regSize == 8u) {
+            Value *tmp = getScratch(8u);
+            mkCvt(OP_CVT, TYPE_U64, tmp, TYPE_U32, blockSize);
+            blockSize = tmp;
+         }
+         Value *srcByteStride = getScratch(regSize);
+         mkOp2(OP_MUL, regType, srcByteStride, typeSizeImm, srcDelta);
+         Value *dstByteStride = getScratch(regSize);
+         mkOp2(OP_MUL, regType, dstByteStride, typeSizeImm, dstDelta);
+
+         Value *srcIndirect = getScratch(regSize);
+         mkOp3(OP_MAD, regType, srcIndirect, tid, srcByteStride, srcPtr.indirect);
+         Value *dstIndirect = getScratch(regSize);
+         mkOp3(OP_MAD, regType, dstIndirect, tid, dstByteStride, dstPtr.indirect);
+
+         if (regSize == 8u) {
+            Value *tmps[2];
+            mkSplit(tmps, 4u, srcIndirect);
+            mkOp2(OP_MERGE, TYPE_U64, srcIndirect, tmps[0], tmps[1]);
+            mkSplit(tmps, 4u, dstIndirect);
+            mkOp2(OP_MERGE, TYPE_U64, dstIndirect, tmps[0], tmps[1]);
+         }
+
+         Value *srcDeltaByteStride = getScratch(regSize);
+         mkOp2(OP_MUL, regType, srcDeltaByteStride, blockSize, srcByteStride);
+         Value *dstDeltaByteStride = getScratch(regSize);
+         mkOp2(OP_MUL, regType, dstDeltaByteStride, blockSize, dstByteStride);
+
+         Value *iter = getScratch(regSize);
+         mkMov(iter, tid, regType);
+
+         BasicBlock *headerBB = new BasicBlock(func);
+         bb->cfg.attach(&headerBB->cfg, Graph::Edge::TREE);
+         setPosition(headerBB, true);
+
+         BasicBlock *mergeBB = new BasicBlock(func);
+         BasicBlock *loopBB = new BasicBlock(func);
+
+         Value *pred = getScratch(1, FILE_PREDICATE);
+         mkCmp(OP_SET, CC_GE, TYPE_U32, pred, regType, iter, numElements);
+         mkFlow(OP_BRA, mergeBB, CC_P, pred);
+         bb->cfg.attach(&loopBB->cfg, Graph::Edge::TREE);
+         bb->cfg.attach(&mergeBB->cfg, Graph::Edge::TREE);
+         setPosition(loopBB, true);
+
+         Value *tmpValue = getScratch(std::max(4u, typeSize));
+         mkLoad(typeEnum, tmpValue, srcSym, srcIndirect);
+         mkStore(OP_STORE, typeEnum, dstSym, dstIndirect, tmpValue);
+
+         mkOp2(OP_ADD, regType, iter, iter, blockSize);
+         mkOp2(OP_ADD, regType, srcIndirect, srcIndirect, srcDeltaByteStride);
+         mkOp2(OP_ADD, regType, dstIndirect, dstIndirect, dstDeltaByteStride);
+         mkFlow(OP_BRA, headerBB, CC_ALWAYS, nullptr);
+         bb->cfg.attach(&headerBB->cfg, Graph::Edge::BACK);
+         setPosition(mergeBB, true);
+
+         spvValues.emplace(resId, SpirVValue{ SpirvFile::NONE, resType, { nullptr }, { } });
+      }
+      break;
+   // TODO(pmoreau): Handle different events
+   case spv::Op::OpGroupWaitEvents:
+      {
+         const ImmediateValue *executionImm = getStructForOperand(0u).value.front().value->asImm();
+         const spv::Scope execution = static_cast<spv::Scope>(executionImm->reg.data.u32);
+         spv_result_t res = generateCtrlBarrier(execution);
+         if (res != SPV_SUCCESS)
+            return res;
       }
       break;
    default:
