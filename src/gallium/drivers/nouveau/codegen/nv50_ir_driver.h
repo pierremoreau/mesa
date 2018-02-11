@@ -84,6 +84,8 @@ struct nv50_ir_prog_info
    uint8_t dbgFlags;
    bool omitLineNum; /* only used for printing the prog when dbgFlags is set */
 
+   struct pipe_debug_callback *debug;
+
    struct {
       int16_t maxGPR;     /* may be -1 if none used */
       int16_t maxOutput;

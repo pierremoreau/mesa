@@ -597,6 +597,8 @@ nvc0_program_translate(struct nvc0_program *prog, uint16_t chipset,
    info->optLevel = 3;
 #endif
 
+   info->debug = debug;
+
    info->bin.smemSize = prog->cp.smem_size;
    info->io.genUserClip = prog->vp.num_ucps;
    info->io.auxCBSlot = 15;

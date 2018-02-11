@@ -379,6 +379,8 @@ nv50_program_translate(struct nv50_program *prog, uint16_t chipset,
    info->optLevel = 3;
 #endif
 
+   info->debug = debug;
+
    ret = nv50_ir_generate_code(info);
    if (ret) {
       NOUVEAU_ERR("shader translation failed: %i\n", ret);
