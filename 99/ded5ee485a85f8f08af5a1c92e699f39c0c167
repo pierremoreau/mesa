@@ -1,0 +1,1 @@
+v3: Switch from using a pointer attribute to a vector (Francisco Jerez)
