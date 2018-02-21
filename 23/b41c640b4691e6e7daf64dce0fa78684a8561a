@@ -1,0 +1,3 @@
+v3:
+* Bump the required version of SPIRV-Tools to the latest release;
+* Add a dependency on llvm-spirv.
