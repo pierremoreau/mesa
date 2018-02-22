@@ -1095,6 +1095,9 @@ bool Converter::assignSlots() {
    }
 
    nir_foreach_variable(var, &nir->inputs) {
+      if (prog->getType() == Program::TYPE_COMPUTE)
+         break;
+
       const glsl_type *type = var->type;
       int slot = var->data.location;
       uint16_t slots = calcSlots(type, prog->getType(), nir->info, true, var);
@@ -1866,6 +1869,18 @@ Converter::visit(nir_intrinsic_instr *insn)
    case nir_intrinsic_load_interpolated_input:
    case nir_intrinsic_load_output: {
       LValues &newDefs = convert(&insn->dest);
+
+      // kernel inputs
+      if (prog->getType() == Program::TYPE_COMPUTE) {
+         const DataType dType = getDType(insn);
+         LValues &newDefs = convert(&insn->dest);
+         Value *indirect;
+         uint32_t offset = nir_intrinsic_base(insn) + getIndirect(&insn->src[0], 0, indirect);
+
+         for (auto i = 0u; i < insn->num_components; ++i)
+            loadFrom(FILE_SHADER_INPUT, 0, dType, newDefs[i], offset, i, indirect);
+         break;
+      }
 
       // FBFetch
       if (prog->getType() == Program::TYPE_FRAGMENT &&
