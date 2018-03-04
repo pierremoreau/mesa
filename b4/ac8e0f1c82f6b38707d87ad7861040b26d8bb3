@@ -1,0 +1,16 @@
+v3:
+* Remove the const on the length argument to CreateProgramWithILKHR (Francisco
+  Jerez);
+* Capitalize comment (Francisco Jerez);
+* Store the IL as a std::vector instead of a pointer + size (Francisco Jerez);
+* Remove the destructor, due to previous change;
+* Remove endianness conversion, as already performed later on (Francisco Jerez);
+* Introduce a free function for compile_program, which calls the right compile
+  function based on the IR format (Francisco Jerez);
+* Add dependency on SPIRV-Tools, as we validate the SPIR-V module fed to
+  clCreateProgramWithILKHR;
+* Introduce an enum for representing which IL is stored in program;
+* Correctly initialise the devices associated to a program created from
+  clCreateProgramWithILKHR;
+* Introduce free functions for validating the SPIR-V binary, and detecting the
+  IL used in the binary fed to clCreateProgramWithILKHR.
