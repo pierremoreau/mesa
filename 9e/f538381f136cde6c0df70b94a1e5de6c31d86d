@@ -1,0 +1,4 @@
+Changes in v4:
+* guard the SPIR-V code;
+* use an istringstream instead of a bidirectional stringstream, and initialise
+  it directly (Francisco Jerez).
