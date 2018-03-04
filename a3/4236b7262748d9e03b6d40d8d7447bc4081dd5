@@ -1,1 +1,3 @@
 v3: Advertise cl_khr_il_program if if the device support NATIVE as IR
+
+Changes in v4: do not advertise SPIR-V support if CLOVER_ALLOW_SPIRV is not defined
