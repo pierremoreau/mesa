@@ -1,0 +1,2 @@
+Changes in v4: drop the modification to the tgsi backend, as already dropped
+               (Aaron Watry)
