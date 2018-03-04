@@ -14,3 +14,5 @@ v3:
   clCreateProgramWithILKHR;
 * Introduce free functions for validating the SPIR-V binary, and detecting the
   IL used in the binary fed to clCreateProgramWithILKHR.
+
+Changes in v4: guard parts of the code behind SPIR-V support
