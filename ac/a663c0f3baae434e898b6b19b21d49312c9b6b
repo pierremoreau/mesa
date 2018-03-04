@@ -1,3 +1,5 @@
 v3: Switch from using a pointer attribute to a vector (Francisco Jerez)
 
 Changes in v4: Use the core define instead of the extension one (Karol Herbst)
+
+v3: Switch from using a pointer attribute to a vector (Francisco Jerez)
