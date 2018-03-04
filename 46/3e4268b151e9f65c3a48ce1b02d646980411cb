@@ -1,0 +1,3 @@
+Changes in v4:
+* validate_build_common no longer returns a list of devices;
+* Dropped duplicate checks.
