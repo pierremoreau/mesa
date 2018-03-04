@@ -5,3 +5,9 @@ Changes in v4:
 v3:
 * Bump the required version of SPIRV-Tools to the latest release;
 * Add a dependency on llvm-spirv.
+
+Changes in v4: make SPIRV-Tools and llvm-spirv optional (Francisco Jerez)
+
+v3:
+* Bump the required version of SPIRV-Tools to the latest release;
+* Add a dependency on llvm-spirv.
