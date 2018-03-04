@@ -1,0 +1,2 @@
+v3: Throw an exception if the cl_khr_il_program extension is not supported
+    (Francisco Jerez)
