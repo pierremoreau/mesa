@@ -1,6 +1,3 @@
-v3: Throw an exception if the cl_khr_il_program extension is not supported
-    (Francisco Jerez)
-
 Changes in v4: Use the core define instead of the extension one (Karol Herbst)
 
 v3: Throw an exception if the cl_khr_il_program extension is not supported
