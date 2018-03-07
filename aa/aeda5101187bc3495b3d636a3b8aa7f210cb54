@@ -1,0 +1,3 @@
+v3:
+* Dropped supported_irs() (Francisco Jerez)
+* Changed supports_ir() argument type to `enum pipe_shader_ir` (Francisco Jerez)
