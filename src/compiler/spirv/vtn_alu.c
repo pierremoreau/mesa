@@ -22,6 +22,7 @@
  */
 
 #include <math.h>
+#include "util/u_math.h"
 #include "vtn_private.h"
 
 /*
@@ -505,6 +506,25 @@ vtn_handle_alu(struct vtn_builder *b, SpvOp opcode,
    case SpvOpIsInf: {
       nir_ssa_def *inf = nir_imm_floatN_t(&b->nb, INFINITY, src[0]->bit_size);
       val->ssa->def = nir_ieq(&b->nb, nir_fabs(&b->nb, src[0]), inf);
+      break;
+   }
+
+   case SpvOpIsFinite: {
+      nir_ssa_def *inf = nir_imm_floatN_t(&b->nb, INFINITY, src[0]->bit_size);
+      val->ssa->def = nir_fne(&b->nb, nir_fabs(&b->nb, src[0]), inf);
+      break;
+   }
+
+   case SpvOpIsNormal: {
+      unsigned bit_size = src[0]->bit_size;
+      uint64_t mask = util_get_floatN_t_exponent_mask(bit_size);
+
+      nir_ssa_def *exp_mask = nir_imm_intN_t(&b->nb, mask, bit_size);
+      nir_ssa_def *exp = nir_iand(&b->nb, src[0], exp_mask);
+      nir_ssa_def *zero = nir_imm_intN_t(&b->nb, 0, bit_size);
+
+      val->ssa->def = nir_iand(&b->nb, nir_ine(&b->nb, exp, zero),
+                                       nir_ine(&b->nb, exp, exp_mask));
       break;
    }
 

@@ -99,6 +99,16 @@ util_get_float32_exponent(float x)
    return ((f.ui >> 23) & 0xff) - 127;
 }
 
+static inline uint64_t
+util_get_floatN_t_exponent_mask(unsigned bit_size)
+{
+   switch (bit_size) {
+   case 64: return 0x7ff0000000000000;
+   case 32: return 0x7f800000;
+   case 16: return 0x7c00;
+   default: assert(!"unknown float format"); return 0;
+   }
+}
 
 /**
  * Fast version of 2^x
