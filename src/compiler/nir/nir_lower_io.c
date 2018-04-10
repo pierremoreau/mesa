@@ -38,7 +38,7 @@
 struct lower_io_state {
    void *dead_ctx;
    nir_builder builder;
-   int (*type_size)(const struct glsl_type *type);
+   const nir_io_type_size_align_cb *tsa_cb;
    nir_variable_mode modes;
    nir_lower_io_options options;
 };
@@ -86,12 +86,20 @@ nir_is_per_vertex_io(const nir_variable *var, gl_shader_stage stage)
    return false;
 }
 
+static int
+default_type_align(const struct glsl_type *type)
+{
+   return 1;
+}
+
 static nir_ssa_def *
 get_io_offset(nir_deref_instr *deref, nir_ssa_def **vertex_index,
               struct lower_io_state *state, unsigned *component)
 {
    nir_builder *b = &state->builder;
-   int (*type_size)(const struct glsl_type *) = state->type_size;
+   int (*type_size)(const struct glsl_type *) = state->tsa_cb->type_size;
+   int (*type_align)(const struct glsl_type *) = state->tsa_cb->type_align ?
+      state->tsa_cb->type_align : default_type_align;
    nir_deref_path path;
    nir_deref_path_init(&path, deref, NULL);
 
@@ -136,7 +144,10 @@ get_io_offset(nir_deref_instr *deref, nir_ssa_def **vertex_index,
 
          unsigned field_offset = 0;
          for (unsigned i = 0; i < (*p)->strct.index; i++) {
-            field_offset += type_size(glsl_get_struct_field(parent->type, i));
+            const struct glsl_type *field_type =
+               glsl_get_struct_field(parent->type, i);
+            field_offset = ALIGN_POT(field_offset, type_align(field_type));
+            field_offset += type_size(field_type);
          }
          offset = nir_iadd_imm(b, offset, field_offset);
       } else {
@@ -206,7 +217,7 @@ lower_load(nir_intrinsic_instr *intrin, struct lower_io_state *state,
       nir_intrinsic_set_component(load, component);
 
    if (load->intrinsic == nir_intrinsic_load_uniform)
-      nir_intrinsic_set_range(load, state->type_size(var->type));
+      nir_intrinsic_set_range(load, state->tsa_cb->type_size(var->type));
 
    if (vertex_index) {
       load->src[0] = nir_src_for_ssa(vertex_index);
@@ -487,9 +498,8 @@ nir_lower_io_block(nir_block *block,
 }
 
 static bool
-nir_lower_io_impl(nir_function_impl *impl,
-                  nir_variable_mode modes,
-                  int (*type_size)(const struct glsl_type *),
+nir_lower_io_impl(nir_function_impl *impl, nir_variable_mode modes,
+                  const nir_io_type_size_align_cb *tsa_cb,
                   nir_lower_io_options options)
 {
    struct lower_io_state state;
@@ -498,7 +508,7 @@ nir_lower_io_impl(nir_function_impl *impl,
    nir_builder_init(&state.builder, impl);
    state.dead_ctx = ralloc_context(NULL);
    state.modes = modes;
-   state.type_size = type_size;
+   state.tsa_cb = tsa_cb;
    state.options = options;
 
    nir_foreach_block(block, impl) {
@@ -513,20 +523,32 @@ nir_lower_io_impl(nir_function_impl *impl,
 }
 
 bool
-nir_lower_io(nir_shader *shader, nir_variable_mode modes,
-             int (*type_size)(const struct glsl_type *),
-             nir_lower_io_options options)
+nir_lower_io2(nir_shader *shader, nir_variable_mode modes,
+              const nir_io_type_size_align_cb *tsa_cb,
+              nir_lower_io_options options)
 {
    bool progress = false;
 
    nir_foreach_function(function, shader) {
       if (function->impl) {
          progress |= nir_lower_io_impl(function->impl, modes,
-                                       type_size, options);
+                                       tsa_cb, options);
       }
    }
 
    return progress;
+}
+
+
+bool
+nir_lower_io(nir_shader *shader, nir_variable_mode modes,
+             int (*type_size)(const struct glsl_type *),
+             nir_lower_io_options options)
+{
+   nir_io_type_size_align_cb tsa_cb = {
+         .type_size = type_size,
+   };
+   return nir_lower_io2(shader, modes, &tsa_cb, options);
 }
 
 /**
