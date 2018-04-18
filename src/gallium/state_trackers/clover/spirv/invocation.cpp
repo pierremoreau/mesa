@@ -775,7 +775,7 @@ clover::spirv::spirv_to_nir(const module &m, const std::string &name,
 
    /* inline all functions first */
    NIR_PASS_V(nir, nir_lower_constant_initializers,
-              (nir_variable_mode)(nir_var_local));
+              (nir_variable_mode)(nir_var_function));
    NIR_PASS_V(nir, nir_lower_returns);
    NIR_PASS_V(nir, nir_inline_functions);
    NIR_PASS_V(nir, nir_copy_prop);
