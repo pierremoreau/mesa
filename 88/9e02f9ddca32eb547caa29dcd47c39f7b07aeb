@@ -1,2 +1,5 @@
 Changes in:
 * v8: Properly align LLVMSPIRVLib comment (Dylan Baker)
+
+      * Only define CLOVER_ALLOW_SPIRV when **both** dependencies are found:
+        autotools was only requiring one or the other.
