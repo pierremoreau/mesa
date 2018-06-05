@@ -1,0 +1,3 @@
+Changes in:
+* v8: Add DEFINES to libclspirv and libclover, in autotools, as they would
+      otherwise never know whether CLOVER_ALLOW_SPIRV has been defined (Dave Airlie)
