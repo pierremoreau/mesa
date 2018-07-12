@@ -489,6 +489,38 @@ binop_convert("uadd_carry", tuint, tuint, commutative, "src0 + src1 < src0")
 
 binop_convert("usub_borrow", tuint, tuint, "", "src0 < src1")
 
+# clamped add/sub
+binop("iadd_sat", tint, commutative + associative, "src1 >= 1 ? (src0 + src1 < src0 ? ((1ull << (bit_size - 1)) - 1) : src0 + src1) : (src0 < src0 + src1 ? (1ull << (bit_size - 1)) : src0 + src1)")
+binop("uadd_sat", tuint, commutative + associative, "src0 + src1 < src0 ? -1ll : src0 + src1")
+binop("isub_sat", tint, "", "src1 < 0 ? (src0 - src1 < src0 ? ((1ull << (bit_size - 1)) - 1) : src0 - src1) : (src0 < src0 - src1 ? (1ull << (bit_size - 1)) : src0 - src1)")
+binop("usub_sat", tuint, "", "src0 < src1 ? 0 : src0 - src1")
+
+# hadd: (a + b) >> 1 (without overflow)
+# x + y = x - (x & ~y) + (x & ~y) + y - (~x & y) + (~x & y)
+#       =      (x & y) + (x & ~y) +      (x & y) + (~x & y)
+#       = 2 *  (x & y) + (x & ~y) +                (~x & y)
+#       =     ((x & y) << 1) + (x ^ y)
+#
+# Since we know that the bottom bit of (x & y) << 1 is zero,
+#
+# (x + y) >> 1 = (((x & y) << 1) + (x ^ y)) >> 1
+#              =   (x & y) +      ((x ^ y)  >> 1)
+binop("ihadd", tint, commutative, "(src0 & src1) + ((src0 ^ src1) >> 1)")
+binop("uhadd", tuint, commutative, "(src0 & src1) + ((src0 ^ src1) >> 1)")
+
+# rhadd: (a + b + 1) >> 1 (without overflow)
+# x + y + 1 = x + (~x & y) - (~x & y) + y + (x & ~y) - (x & ~y) + 1
+#           =      (x | y) - (~x & y) +      (x | y) - (x & ~y) + 1
+#           = 2 *  (x | y) - ((~x & y) +               (x & ~y)) + 1
+#           =     ((x | y) << 1) - (x ^ y) + 1
+#
+# Since we know that the bottom bit of (x & y) << 1 is zero,
+#
+# (x + y + 1) >> 1 = (x | y) + (-(x ^ y) + 1) >> 1)
+#                  = (x | y) -  ((x ^ y)      >> 1)
+binop("irhadd", tint, commutative, "(src0 | src1) + ((src0 ^ src1) >> 1)")
+binop("urhadd", tuint, commutative, "(src0 | src1) + ((src0 ^ src1) >> 1)")
+
 binop("umod", tuint, "", "src1 == 0 ? 0 : src0 % src1")
 
 # For signed integers, there are several different possible definitions of
