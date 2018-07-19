@@ -3593,9 +3593,27 @@ vtn_handle_preamble_instruction(struct vtn_builder *b, SpvOp opcode,
       break;
 
    case SpvOpMemoryModel:
-      vtn_assert(w[1] == SpvAddressingModelLogical);
+      switch (w[1]) {
+      case SpvAddressingModelPhysical32:
+         b->shader->ptr_size = 32;
+         b->physical_ptrs = true;
+         break;
+      case SpvAddressingModelPhysical64:
+         b->shader->ptr_size = 64;
+         b->physical_ptrs = true;
+         break;
+      case SpvAddressingModelLogical:
+         b->shader->ptr_size = 0;
+         b->physical_ptrs = false;
+         break;
+      default:
+         vtn_fail("Unknown addressing model");
+         break;
+      }
+
       vtn_assert(w[2] == SpvMemoryModelSimple ||
-                 w[2] == SpvMemoryModelGLSL450);
+                 w[2] == SpvMemoryModelGLSL450 ||
+                 w[2] == SpvMemoryModelOpenCL);
       break;
 
    case SpvOpEntryPoint:
@@ -4270,6 +4288,8 @@ spirv_to_nir(const uint32_t *words, size_t word_count,
    /* Skip the SPIR-V header, handled at vtn_create_builder */
    words+= 5;
 
+   b->shader = nir_shader_create(b, stage, nir_options, NULL);
+
    /* Handle all the preamble instructions */
    words = vtn_foreach_instruction(b, words, word_end,
                                    vtn_handle_preamble_instruction);
@@ -4279,8 +4299,6 @@ spirv_to_nir(const uint32_t *words, size_t word_count,
       ralloc_free(b);
       return NULL;
    }
-
-   b->shader = nir_shader_create(b, stage, nir_options, NULL);
 
    /* Set shader info defaults */
    b->shader->info.gs.invocations = 1;

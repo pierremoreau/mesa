@@ -605,6 +605,9 @@ struct vtn_builder {
    unsigned func_param_idx;
 
    bool has_loop_continue;
+
+   /* when a physical memory model is choosen */
+   bool physical_ptrs;
 };
 
 nir_ssa_def *
