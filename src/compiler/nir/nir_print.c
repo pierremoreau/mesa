@@ -413,6 +413,8 @@ get_variable_mode_str(nir_variable_mode mode, bool want_local_global_mode)
       return want_local_global_mode ? "private" : "";
    case nir_var_function:
       return want_local_global_mode ? "function" : "";
+   case nir_var_global:
+      return want_local_global_mode ? "global" : "";
    default:
       return "";
    }
