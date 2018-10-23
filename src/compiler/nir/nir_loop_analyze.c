@@ -405,7 +405,7 @@ find_array_access_via_induction(loop_info_state *state,
                                 nir_loop_variable **array_index_out)
 {
    for (nir_deref_instr *d = deref; d; d = nir_deref_instr_parent(d)) {
-      if (d->deref_type != nir_deref_type_array)
+      if (!nir_deref_is_array(d->deref_type))
          continue;
 
       assert(d->arr.index.is_ssa);

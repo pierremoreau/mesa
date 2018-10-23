@@ -991,6 +991,7 @@ typedef enum {
    nir_deref_type_array_wildcard,
    nir_deref_type_struct,
    nir_deref_type_cast,
+   nir_deref_type_ptr_as_array,
 } nir_deref_type;
 
 typedef struct {
@@ -1015,6 +1016,7 @@ typedef struct {
 
    /** Additional deref parameters */
    union {
+      /** used for deref_array and deref_ptr_as_array */
       struct {
          nir_src index;
       } arr;
@@ -1068,6 +1070,13 @@ nir_deref_instr_get_variable(const nir_deref_instr *instr)
 bool nir_deref_instr_has_indirect(nir_deref_instr *instr);
 
 bool nir_deref_instr_remove_if_unused(nir_deref_instr *instr);
+
+static inline bool
+nir_deref_is_array(const nir_deref_instr *instr)
+{
+   return instr->deref_type == nir_deref_type_array ||
+          instr->deref_type == nir_deref_type_ptr_as_array;
+}
 
 typedef struct {
    nir_instr instr;

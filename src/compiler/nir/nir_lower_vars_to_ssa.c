@@ -161,14 +161,19 @@ get_deref_node_recur(nir_deref_instr *deref,
 
       return parent->children[deref->strct.index];
 
+   case nir_deref_type_ptr_as_array:
+      return parent;
+
    case nir_deref_type_array: {
       if (nir_src_is_const(deref->arr.index)) {
+         const struct glsl_type *parent_type = deref->deref_type == nir_deref_type_array ? parent->type : deref->type;
          uint32_t index = nir_src_as_uint(deref->arr.index);
          /* This is possible if a loop unrolls and generates an
           * out-of-bounds offset.  We need to handle this at least
           * somewhat gracefully.
           */
-         if (index >= glsl_get_length(parent->type))
+         assert(glsl_type_is_array_or_matrix(parent_type));
+         if (index >= glsl_get_length(parent_type))
             return NULL;
 
          if (parent->children[index] == NULL) {
@@ -196,6 +201,9 @@ get_deref_node_recur(nir_deref_instr *deref,
       }
 
       return parent->wildcard;
+
+   case nir_deref_type_cast:
+      return parent->children[0];
 
    default:
       unreachable("Invalid deref type");
@@ -250,6 +258,7 @@ foreach_deref_node_worker(struct deref_node *node, nir_deref_instr **path,
       }
       return;
 
+   case nir_deref_type_ptr_as_array:
    case nir_deref_type_array: {
       uint32_t index = nir_src_as_uint((*path)->arr.index);
 
@@ -314,6 +323,7 @@ path_may_be_aliased_node(struct deref_node *node, nir_deref_instr **path,
          return false;
       }
 
+   case nir_deref_type_ptr_as_array:
    case nir_deref_type_array: {
       if (!nir_src_is_const((*path)->arr.index))
          return true;

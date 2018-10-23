@@ -398,6 +398,7 @@ enum vtn_access_mode {
 struct vtn_access_link {
    enum vtn_access_mode mode;
    uint32_t id;
+   struct vtn_type *type;
 };
 
 struct vtn_access_chain {

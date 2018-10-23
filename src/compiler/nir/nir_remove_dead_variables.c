@@ -107,6 +107,8 @@ remove_dead_var_writes(nir_shader *shader, struct set *live)
                nir_variable_mode parent_mode;
                if (deref->deref_type == nir_deref_type_var)
                   parent_mode = deref->var->data.mode;
+               else if (!nir_deref_instr_parent(deref))
+                  parent_mode = deref->mode;
                else
                   parent_mode = nir_deref_instr_parent(deref)->mode;
 

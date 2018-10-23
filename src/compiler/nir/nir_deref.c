@@ -70,7 +70,8 @@ nir_deref_path_init(nir_deref_path *path,
 done:
    assert(head == path->path);
    assert(tail == head + count);
-   assert((*head)->deref_type == nir_deref_type_var);
+   assert((*head)->deref_type == nir_deref_type_var ||
+          (*head)->deref_type == nir_deref_type_cast);
    assert(*tail == NULL);
 }
 
@@ -111,7 +112,7 @@ nir_deref_instr_has_indirect(nir_deref_instr *instr)
       if (instr->deref_type == nir_deref_type_cast)
          return true;
 
-      if (instr->deref_type == nir_deref_type_array &&
+      if (nir_deref_is_array(instr) &&
           !nir_src_is_const(instr->arr.index))
          return true;
 
@@ -256,6 +257,9 @@ nir_fixup_deref_modes(nir_shader *shader)
 
             nir_deref_instr *deref = nir_instr_as_deref(instr);
 
+            if (deref->deref_type == nir_deref_type_cast)
+               continue;
+
             nir_variable_mode parent_mode;
             if (deref->deref_type == nir_deref_type_var) {
                parent_mode = deref->var->data.mode;
@@ -278,6 +282,20 @@ nir_compare_deref_paths(nir_deref_path *a_path,
 {
    if (a_path->path[0]->var != b_path->path[0]->var)
       return nir_derefs_do_not_alias;
+
+   /* first compare root element */
+   if (a_path->path[0]->deref_type != b_path->path[0]->deref_type)
+      return 0;
+
+   if (a_path->path[0]->deref_type == nir_deref_type_var &&
+       a_path->path[0]->var != b_path->path[0]->var)
+         return 0;
+
+   if (a_path->path[0]->deref_type == nir_deref_type_cast &&
+       !nir_srcs_equal(a_path->path[0]->parent, b_path->path[0]->parent))
+         return 0;
+
+   /* TODO: path[0] could be within the other path */
 
    /* Start off assuming they fully compare.  We ignore equality for now.  In
     * the end, we'll determine that by containment.
@@ -368,8 +386,8 @@ nir_compare_derefs(nir_deref_instr *a, nir_deref_instr *b)
    nir_deref_path a_path, b_path;
    nir_deref_path_init(&a_path, a, NULL);
    nir_deref_path_init(&b_path, b, NULL);
-   assert(a_path.path[0]->deref_type == nir_deref_type_var);
-   assert(b_path.path[0]->deref_type == nir_deref_type_var);
+   assert(a_path.path[0]->deref_type == nir_deref_type_var || a_path.path[0]->deref_type == nir_deref_type_cast);
+   assert(b_path.path[0]->deref_type == nir_deref_type_var || b_path.path[0]->deref_type == nir_deref_type_cast);
 
    nir_deref_compare_result result = nir_compare_deref_paths(&a_path, &b_path);
 

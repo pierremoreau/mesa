@@ -463,7 +463,7 @@ nir_deref_instr_create(nir_shader *shader, nir_deref_type deref_type)
    if (deref_type != nir_deref_type_var)
       src_init(&instr->parent);
 
-   if (deref_type == nir_deref_type_array)
+   if (nir_deref_is_array(instr))
       src_init(&instr->arr.index);
 
    dest_init(&instr->dest);
@@ -1069,7 +1069,7 @@ visit_deref_instr_src(nir_deref_instr *instr,
          return false;
    }
 
-   if (instr->deref_type == nir_deref_type_array) {
+   if (nir_deref_is_array(instr)) {
       if (!visit_src(&instr->arr.index, cb, state))
          return false;
    }

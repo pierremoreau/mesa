@@ -587,7 +587,8 @@ print_deref_link(nir_deref_instr *instr, bool whole_chain, print_state *state)
               glsl_get_struct_elem_name(parent->type, instr->strct.index));
       break;
 
-   case nir_deref_type_array: {
+   case nir_deref_type_array:
+   case nir_deref_type_ptr_as_array: {
       nir_const_value *const_index = nir_src_as_const_value(instr->arr.index);
       if (const_index) {
          fprintf(fp, "[%u]", const_index->u32[0]);
@@ -628,6 +629,9 @@ print_deref_instr(nir_deref_instr *instr, print_state *state)
       break;
    case nir_deref_type_cast:
       fprintf(fp, " = deref_cast ");
+      break;
+   case nir_deref_type_ptr_as_array:
+      fprintf(fp, " = deref_ptr_as_array ");
       break;
    default:
       unreachable("Invalid deref instruction type");

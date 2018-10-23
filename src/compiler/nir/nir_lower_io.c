@@ -102,8 +102,10 @@ get_io_offset(nir_deref_instr *deref, nir_ssa_def **vertex_index,
       state->tsa_cb->type_align : default_type_align;
    nir_deref_path path;
    nir_deref_path_init(&path, deref, NULL);
+   unsigned ptr_size = b->shader->ptr_size ? b->shader->ptr_size : 32;
 
-   assert(path.path[0]->deref_type == nir_deref_type_var);
+   nir_deref_instr *parent = path.path[0];
+   assert(parent->deref_type == nir_deref_type_var || parent->deref_type == nir_deref_type_cast);
    nir_deref_instr **p = &path.path[1];
 
    /* For per-vertex input arrays (i.e. geometry shader inputs), keep the
@@ -115,7 +117,7 @@ get_io_offset(nir_deref_instr *deref, nir_ssa_def **vertex_index,
       p++;
    }
 
-   if (path.path[0]->var->data.compact) {
+   if (path.path[0]->var && path.path[0]->var->data.compact) {
       assert((*p)->deref_type == nir_deref_type_array);
       assert(glsl_type_is_scalar((*p)->type));
 
@@ -128,10 +130,14 @@ get_io_offset(nir_deref_instr *deref, nir_ssa_def **vertex_index,
    }
 
    /* Just emit code and let constant-folding go to town */
-   nir_ssa_def *offset = nir_imm_int(b, 0);
+   nir_ssa_def *offset;
+   if (parent->deref_type == nir_deref_type_var)
+      offset = nir_imm_intN_t(b, 0, ptr_size);
+   else
+      offset = nir_ssa_for_src(b, parent->parent, 1);
 
    for (; *p; p++) {
-      if ((*p)->deref_type == nir_deref_type_array) {
+      if (nir_deref_is_array(*p)) {
          unsigned size = type_size((*p)->type);
 
          nir_ssa_def *mul =
@@ -150,6 +156,8 @@ get_io_offset(nir_deref_instr *deref, nir_ssa_def **vertex_index,
             field_offset += type_size(field_type);
          }
          offset = nir_iadd_imm(b, offset, field_offset);
+      } else if ((*p)->deref_type == nir_deref_type_cast) {
+         continue;
       } else {
          unreachable("Unsupported deref type");
       }
@@ -163,10 +171,10 @@ get_io_offset(nir_deref_instr *deref, nir_ssa_def **vertex_index,
 static nir_intrinsic_instr *
 lower_load(nir_intrinsic_instr *intrin, struct lower_io_state *state,
            nir_ssa_def *vertex_index, nir_variable *var, nir_ssa_def *offset,
-           unsigned component)
+           unsigned component, nir_variable_mode mode_no_var)
 {
    const nir_shader *nir = state->builder.shader;
-   nir_variable_mode mode = var->data.mode;
+   nir_variable_mode mode = var ? var->data.mode : mode_no_var;
    nir_ssa_def *barycentric = NULL;
 
    nir_intrinsic_op op;
@@ -204,6 +212,9 @@ lower_load(nir_intrinsic_instr *intrin, struct lower_io_state *state,
    case nir_var_shared:
       op = nir_intrinsic_load_shared;
       break;
+   case nir_var_global:
+      op = nir_intrinsic_load_global;
+      break;
    default:
       unreachable("Unknown variable mode");
    }
@@ -212,7 +223,9 @@ lower_load(nir_intrinsic_instr *intrin, struct lower_io_state *state,
       nir_intrinsic_instr_create(state->builder.shader, op);
    load->num_components = intrin->num_components;
 
-   nir_intrinsic_set_base(load, var->data.driver_location);
+   if (mode != nir_var_global)
+      nir_intrinsic_set_base(load, var->data.driver_location);
+
    if (mode == nir_var_shader_in || mode == nir_var_shader_out)
       nir_intrinsic_set_component(load, component);
 
@@ -235,13 +248,15 @@ lower_load(nir_intrinsic_instr *intrin, struct lower_io_state *state,
 static nir_intrinsic_instr *
 lower_store(nir_intrinsic_instr *intrin, struct lower_io_state *state,
             nir_ssa_def *vertex_index, nir_variable *var, nir_ssa_def *offset,
-            unsigned component)
+            unsigned component, nir_variable_mode mode_no_var)
 {
-   nir_variable_mode mode = var->data.mode;
+   nir_variable_mode mode = var ? var->data.mode : mode_no_var;
 
    nir_intrinsic_op op;
    if (mode == nir_var_shared) {
       op = nir_intrinsic_store_shared;
+   } else if (mode == nir_var_global) {
+      op = nir_intrinsic_store_global;
    } else {
       assert(mode == nir_var_shader_out);
       op = vertex_index ? nir_intrinsic_store_per_vertex_output :
@@ -254,7 +269,8 @@ lower_store(nir_intrinsic_instr *intrin, struct lower_io_state *state,
 
    nir_src_copy(&store->src[0], &intrin->src[1], store);
 
-   nir_intrinsic_set_base(store, var->data.driver_location);
+   if (mode != nir_var_global)
+      nir_intrinsic_set_base(store, var->data.driver_location);
 
    if (mode == nir_var_shader_out)
       nir_intrinsic_set_component(store, component);
@@ -267,6 +283,13 @@ lower_store(nir_intrinsic_instr *intrin, struct lower_io_state *state,
    store->src[vertex_index ? 2 : 1] = nir_src_for_ssa(offset);
 
    return store;
+}
+
+static nir_ssa_def *
+lower_ssa_from_deref(nir_intrinsic_instr *intrin, struct lower_io_state *state,
+                     nir_ssa_def *offset, unsigned component)
+{
+   return offset;
 }
 
 static nir_intrinsic_instr *
@@ -320,7 +343,7 @@ lower_interpolate_at(nir_intrinsic_instr *intrin, struct lower_io_state *state,
 
    /* Ignore interpolateAt() for flat variables - flat is flat. */
    if (var->data.interpolation == INTERP_MODE_FLAT)
-      return lower_load(intrin, state, NULL, var, offset, component);
+      return lower_load(intrin, state, NULL, var, offset, component, nir_var_shader_in);
 
    nir_intrinsic_op bary_op;
    switch (intrin->intrinsic) {
@@ -382,6 +405,7 @@ nir_lower_io_block(nir_block *block,
       switch (intrin->intrinsic) {
       case nir_intrinsic_load_deref:
       case nir_intrinsic_store_deref:
+      case nir_intrinsic_ssa_from_deref:
       case nir_intrinsic_deref_atomic_add:
       case nir_intrinsic_deref_atomic_imin:
       case nir_intrinsic_deref_atomic_umin:
@@ -412,7 +436,7 @@ nir_lower_io_block(nir_block *block,
       nir_deref_instr *deref = nir_src_as_deref(intrin->src[0]);
 
       nir_variable *var = nir_deref_instr_get_variable(deref);
-      nir_variable_mode mode = var->data.mode;
+      nir_variable_mode mode = var ? var->data.mode : deref->mode;
 
       if ((state->modes & mode) == 0)
          continue;
@@ -420,16 +444,17 @@ nir_lower_io_block(nir_block *block,
       if (mode != nir_var_shader_in &&
           mode != nir_var_shader_out &&
           mode != nir_var_shared &&
-          mode != nir_var_uniform)
+          mode != nir_var_uniform &&
+          mode != nir_var_global)
          continue;
 
       b->cursor = nir_before_instr(instr);
 
-      const bool per_vertex = nir_is_per_vertex_io(var, b->shader->info.stage);
+      const bool per_vertex = var ? nir_is_per_vertex_io(var, b->shader->info.stage) : false;
 
       nir_ssa_def *offset;
       nir_ssa_def *vertex_index = NULL;
-      unsigned component_offset = var->data.location_frac;
+      unsigned component_offset = var ? var->data.location_frac : 0;
 
       offset = get_io_offset(deref, per_vertex ? &vertex_index : NULL,
                              state, &component_offset);
@@ -439,13 +464,27 @@ nir_lower_io_block(nir_block *block,
       switch (intrin->intrinsic) {
       case nir_intrinsic_load_deref:
          replacement = lower_load(intrin, state, vertex_index, var, offset,
-                                  component_offset);
+                                  component_offset, mode);
          break;
 
       case nir_intrinsic_store_deref:
          replacement = lower_store(intrin, state, vertex_index, var, offset,
-                                   component_offset);
+                                   component_offset, mode);
          break;
+
+      case nir_intrinsic_ssa_from_deref: {
+         nir_ssa_def *def = lower_ssa_from_deref(intrin, state, offset,
+                                            component_offset);
+         if (intrin->dest.is_ssa) {
+            nir_ssa_def_rewrite_uses(&intrin->dest.ssa, nir_src_for_ssa(def));
+         } else {
+            // TODO
+//            nir_dest_copy(&replacement->dest, &intrin->dest, &intrin->instr);
+         }
+         nir_instr_remove(&intrin->instr);
+         progress = true;
+         continue;
+      }
 
       case nir_intrinsic_deref_atomic_add:
       case nir_intrinsic_deref_atomic_imin:

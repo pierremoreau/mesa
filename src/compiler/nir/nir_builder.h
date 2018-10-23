@@ -761,6 +761,7 @@ nir_ssa_for_alu_src(nir_builder *build, nir_alu_instr *instr, unsigned srcn)
 static inline nir_deref_instr *
 nir_build_deref_var(nir_builder *build, nir_variable *var)
 {
+   unsigned ptr_size = build->shader->ptr_size ? build->shader->ptr_size : 32;
    nir_deref_instr *deref =
       nir_deref_instr_create(build->shader, nir_deref_type_var);
 
@@ -768,7 +769,7 @@ nir_build_deref_var(nir_builder *build, nir_variable *var)
    deref->type = var->type;
    deref->var = var;
 
-   nir_ssa_dest_init(&deref->instr, &deref->dest, 1, 32, NULL);
+   nir_ssa_dest_init(&deref->instr, &deref->dest, 1, ptr_size, NULL);
 
    nir_builder_instr_insert(build, &deref->instr);
 
@@ -788,6 +789,27 @@ nir_build_deref_array(nir_builder *build, nir_deref_instr *parent,
 
    deref->mode = parent->mode;
    deref->type = glsl_get_array_element(parent->type);
+   deref->parent = nir_src_for_ssa(&parent->dest.ssa);
+   deref->arr.index = nir_src_for_ssa(index);
+
+   nir_ssa_dest_init(&deref->instr, &deref->dest,
+                     parent->dest.ssa.num_components,
+                     parent->dest.ssa.bit_size, NULL);
+
+   nir_builder_instr_insert(build, &deref->instr);
+
+   return deref;
+}
+
+static inline nir_deref_instr *
+nir_build_deref_ptr_as_array(nir_builder *build, nir_deref_instr *parent,
+                             nir_ssa_def *index, const struct glsl_type *type)
+{
+   nir_deref_instr *deref =
+      nir_deref_instr_create(build->shader, nir_deref_type_ptr_as_array);
+
+   deref->mode = parent->mode;
+   deref->type = type;
    deref->parent = nir_src_for_ssa(&parent->dest.ssa);
    deref->arr.index = nir_src_for_ssa(index);
 
@@ -929,6 +951,19 @@ nir_load_deref(nir_builder *build, nir_deref_instr *deref)
                      glsl_get_bit_size(deref->type), NULL);
    nir_builder_instr_insert(build, &load->instr);
    return &load->dest.ssa;
+}
+
+static inline nir_ssa_def*
+nir_ssa_from_deref(nir_builder *build, nir_deref_instr *deref,
+                   const struct glsl_type *type)
+{
+   nir_intrinsic_instr *ssa =
+      nir_intrinsic_instr_create(build->shader, nir_intrinsic_ssa_from_deref);
+   ssa->num_components = glsl_get_vector_elements(type);
+   ssa->src[0] = nir_src_for_ssa(&deref->dest.ssa);
+   nir_ssa_dest_init_for_type(&ssa->instr, &ssa->dest, type, NULL);
+   nir_builder_instr_insert(build, &ssa->instr);
+   return &ssa->dest.ssa;
 }
 
 static inline void

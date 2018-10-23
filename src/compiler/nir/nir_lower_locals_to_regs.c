@@ -54,6 +54,7 @@ hash_deref(const void *void_deref)
          return _mesa_fnv32_1a_accumulate(hash, deref->var);
 
       case nir_deref_type_array:
+      case nir_deref_type_ptr_as_array:
          continue; /* Do nothing */
 
       case nir_deref_type_struct:
@@ -155,20 +156,22 @@ get_deref_reg_src(nir_deref_instr *deref, struct locals_to_regs_state *state)
          src.reg.base_offset += nir_src_as_uint(d->arr.index) *
                                 inner_array_size;
       } else {
+         nir_ssa_def *src1 = nir_ssa_for_src(b, d->arr.index, 1);
+
          if (src.reg.indirect) {
             assert(src.reg.base_offset == 0);
          } else {
             src.reg.indirect = ralloc(b->shader, nir_src);
             *src.reg.indirect =
-               nir_src_for_ssa(nir_imm_int(b, src.reg.base_offset));
+               nir_src_for_ssa(nir_imm_intN_t(b, src.reg.base_offset, src1->bit_size));
             src.reg.base_offset = 0;
          }
 
          assert(src.reg.indirect->is_ssa);
          src.reg.indirect->ssa =
             nir_iadd(b, src.reg.indirect->ssa,
-                        nir_imul(b, nir_ssa_for_src(b, d->arr.index, 1),
-                                    nir_imm_int(b, inner_array_size)));
+                        nir_imul(b, src1,
+                                 nir_imm_intN_t(b, inner_array_size, src1->bit_size)));
       }
 
       inner_array_size *= glsl_get_length(nir_deref_instr_parent(d)->type);

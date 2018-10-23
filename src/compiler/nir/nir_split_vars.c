@@ -395,7 +395,7 @@ mark_array_deref_used(nir_deref_instr *deref,
     */
    for (unsigned i = 0; i < info->num_levels; i++) {
       nir_deref_instr *p = path.path[i + 1];
-      if (p->deref_type == nir_deref_type_array &&
+      if (nir_deref_is_array(p) &&
           !nir_src_is_const(p->arr.index))
          info->levels[i].split = false;
    }
@@ -1369,7 +1369,7 @@ shrink_vec_var_access_impl(nir_function_impl *impl,
              */
             if (deref->deref_type == nir_deref_type_var) {
                deref->type = deref->var->type;
-            } else if (deref->deref_type == nir_deref_type_array ||
+            } else if (nir_deref_is_array(deref) ||
                        deref->deref_type == nir_deref_type_array_wildcard) {
                nir_deref_instr *parent = nir_deref_instr_parent(deref);
                assert(glsl_type_is_array(parent->type) ||

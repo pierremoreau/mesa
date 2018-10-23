@@ -65,6 +65,7 @@ emit_deref_copy_load_store(nir_builder *b,
    }
 
    if (dst_deref_arr || src_deref_arr) {
+      unsigned ptr_size = b->shader->ptr_size ? b->shader->ptr_size : 32;
       assert(dst_deref_arr && src_deref_arr);
       assert((*dst_deref_arr)->deref_type == nir_deref_type_array_wildcard);
       assert((*src_deref_arr)->deref_type == nir_deref_type_array_wildcard);
@@ -75,7 +76,7 @@ emit_deref_copy_load_store(nir_builder *b,
       assert(length > 0);
 
       for (unsigned i = 0; i < length; i++) {
-         nir_ssa_def *index = nir_imm_int(b, i);
+         nir_ssa_def *index = nir_imm_intN_t(b, i, ptr_size);
          emit_deref_copy_load_store(b,
                                     nir_build_deref_array(b, dst_deref, index),
                                     dst_deref_arr + 1,

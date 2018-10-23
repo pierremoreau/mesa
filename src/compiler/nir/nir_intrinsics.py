@@ -139,6 +139,7 @@ intrinsic("load_param", dest_comp=0, indices=[PARAM_IDX], flags=[CAN_ELIMINATE])
 intrinsic("load_deref", dest_comp=0, src_comp=[1], flags=[CAN_ELIMINATE])
 intrinsic("store_deref", src_comp=[1, 0], indices=[WRMASK])
 intrinsic("copy_deref", src_comp=[1, 1])
+intrinsic("ssa_from_deref", dest_comp=0, src_comp=[1], flags=[CAN_ELIMINATE])
 
 # Interpolation of input.  The interp_deref_at* intrinsics are similar to the
 # load_var intrinsic acting on a shader input except that they interpolate the
@@ -584,6 +585,9 @@ load("shared", 1, [BASE, ALIGN_MUL, ALIGN_OFFSET], [CAN_ELIMINATE])
 load("push_constant", 1, [BASE, RANGE], [CAN_ELIMINATE, CAN_REORDER])
 # src[] = { offset }. const_index[] = { base, range }
 load("constant", 1, [BASE, RANGE], [CAN_ELIMINATE, CAN_REORDER])
+# src[] = { address }. No const_index
+load("global", 1, flags=[CAN_ELIMINATE])
+load("private", 1, flags=[CAN_ELIMINATE])
 
 # Stores work the same way as loads, except now the first source is the value
 # to store and the second (and possibly third) source specify where to store
@@ -604,3 +608,6 @@ store("ssbo", 3, [WRMASK, ACCESS, ALIGN_MUL, ALIGN_OFFSET])
 # src[] = { value, offset }.
 # const_index[] = { base, write_mask, align_mul, align_offset }
 store("shared", 2, [BASE, WRMASK, ALIGN_MUL, ALIGN_OFFSET])
+# src[] = { value, address }. const_index[] = { write_mask }
+store("global", 2, [WRMASK])
+store("private", 2, [WRMASK])

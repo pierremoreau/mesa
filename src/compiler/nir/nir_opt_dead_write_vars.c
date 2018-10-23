@@ -79,10 +79,10 @@ update_unused_writes(struct util_dynarray *unused_writes,
    bool progress = false;
 
    /* This pass assumes that destination of copies and stores are derefs that
-    * end in a vector or scalar (it is OK to have wildcards or indirects for
+    * end in a vector, scalar or struct (it is OK to have wildcards or indirects for
     * arrays).
     */
-   assert(glsl_type_is_vector_or_scalar(dst->type));
+   assert(glsl_type_is_vector_or_scalar(dst->type) || glsl_type_is_struct(dst->type));
 
    /* Find writes that are unused and can be removed. */
    util_dynarray_foreach_reverse(unused_writes, struct write_entry, entry) {

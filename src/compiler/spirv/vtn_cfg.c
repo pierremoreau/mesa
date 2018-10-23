@@ -236,6 +236,7 @@ vtn_cfg_handle_prepass_instruction(struct vtn_builder *b, SpvOp opcode,
 {
    switch (opcode) {
    case SpvOpFunction: {
+      unsigned ptr_size = b->physical_ptrs ? b->shader->ptr_size : 32;
       vtn_assert(b->func == NULL);
       b->func = rzalloc(b, struct vtn_function);
 
@@ -270,7 +271,7 @@ vtn_cfg_handle_prepass_instruction(struct vtn_builder *b, SpvOp opcode,
       if (func_type->return_type->base_type != vtn_base_type_void) {
          /* The return value is a regular pointer */
          func->params[idx++] = (nir_parameter) {
-            .num_components = 1, .bit_size = 32,
+            .num_components = 1, .bit_size = ptr_size,
          };
       }
 

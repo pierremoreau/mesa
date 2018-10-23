@@ -1228,6 +1228,17 @@ vtn_handle_type(struct vtn_builder *b, SpvOp opcode,
       val->type->storage_class = storage_class;
       val->type->deref = deref_type;
 
+      /* in kernel mode all pointers are sized according to the addressing
+       * model
+       */
+      if (b->physical_ptrs) {
+         if (b->shader->ptr_size == 64)
+            val->type->type = glsl_uint64_t_type();
+         else
+            val->type->type = glsl_uint_type();
+         break;
+      }
+
       if (storage_class == SpvStorageClassUniform ||
           storage_class == SpvStorageClassStorageBuffer) {
          /* These can actually be stored to nir_variables and used as SSA
@@ -3930,6 +3941,7 @@ vtn_handle_body_instruction(struct vtn_builder *b, SpvOp opcode,
    case SpvOpAccessChain:
    case SpvOpPtrAccessChain:
    case SpvOpInBoundsAccessChain:
+   case SpvOpInBoundsPtrAccessChain:
    case SpvOpArrayLength:
       vtn_handle_variables(b, opcode, w, count);
       break;
@@ -4385,17 +4397,29 @@ spirv_to_nir(const uint32_t *words, size_t word_count,
       nir_call_instr *call = nir_call_instr_create(b->nb.shader, entry_point);
 
       for (unsigned i = 0; i < entry_point->num_params; ++i) {
+         struct vtn_type *type = b->entry_point->func->type->params[i];
+         bool is_fake_ptr = type->base_type == vtn_base_type_pointer && type->storage_class == SpvStorageClassFunction;
+
          /* input variable */
          nir_variable *in_var = rzalloc(b->nb.shader, nir_variable);
          in_var->data.mode = nir_var_shader_in;
          in_var->data.read_only = true;
          in_var->data.location = i;
-         in_var->type = b->entry_point->func->type->params[i]->type;
+         if (is_fake_ptr)
+            in_var->type = type->deref->type;
+         else
+            in_var->type = type->type;
 
          nir_shader_add_variable(b->nb.shader, in_var);
          b->nb.shader->num_inputs++;
 
-         call->params[i] = nir_src_for_ssa(nir_load_var(&b->nb, in_var));
+         if (is_fake_ptr) {
+            nir_variable *copy_var = nir_local_variable_create(main_entry_point->impl, in_var->type, in_var->name);
+            nir_copy_var(&b->nb, copy_var, in_var);
+            call->params[i] = nir_src_for_ssa(&nir_build_deref_var(&b->nb, copy_var)->dest.ssa);
+         } else {
+            call->params[i] = nir_src_for_ssa(nir_load_var(&b->nb, in_var));
+         }
       }
 
       nir_builder_instr_insert(&b->nb, &call->instr);

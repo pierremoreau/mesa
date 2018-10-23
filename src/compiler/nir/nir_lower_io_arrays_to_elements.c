@@ -52,7 +52,7 @@ get_io_offset(nir_builder *b, nir_deref_instr *deref, nir_variable *var,
 
    unsigned offset = 0;
    for (; *p; p++) {
-      if ((*p)->deref_type == nir_deref_type_array) {
+      if (nir_deref_is_array(*p)) {
          /* must not be indirect dereference */
          unsigned index = nir_src_as_uint((*p)->arr.index);
 
@@ -191,7 +191,7 @@ deref_has_indirect(nir_builder *b, nir_variable *var, nir_deref_path *path)
    }
 
    for (; *p; p++) {
-      if ((*p)->deref_type != nir_deref_type_array)
+      if (!nir_deref_is_array(*p))
          continue;
 
       if (!nir_src_is_const((*p)->arr.index))

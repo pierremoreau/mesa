@@ -136,6 +136,7 @@ validate_reg_src(nir_src *src, validate_state *state,
                  unsigned bit_sizes, unsigned num_components)
 {
    validate_assert(state, src->reg.reg != NULL);
+   unsigned ptr_size = state->shader->ptr_size ? state->shader->ptr_size : 32;
 
    struct hash_entry *entry;
    entry = _mesa_hash_table_search(state->regs, src->reg.reg);
@@ -171,7 +172,7 @@ validate_reg_src(nir_src *src, validate_state *state,
       validate_assert(state, (src->reg.indirect->is_ssa ||
               src->reg.indirect->reg.indirect == NULL) &&
              "only one level of indirection allowed");
-      validate_src(src->reg.indirect, state, 32, 1);
+      validate_src(src->reg.indirect, state, ptr_size, 1);
    }
 }
 
@@ -448,7 +449,7 @@ validate_deref_instr(nir_deref_instr *instr, validate_state *state)
 
       case nir_deref_type_array:
       case nir_deref_type_array_wildcard:
-         if (instr->mode == nir_var_shared) {
+         if (instr->mode == nir_var_shared || instr->mode == nir_var_global) {
             /* Shared variables have a bit more relaxed rules because we need
              * to be able to handle array derefs on vectors.  Fortunately,
              * nir_lower_io handles these just fine.
@@ -464,9 +465,19 @@ validate_deref_instr(nir_deref_instr *instr, validate_state *state)
          validate_assert(state,
             instr->type == glsl_get_array_element(parent->type));
 
-         if (instr->deref_type == nir_deref_type_array)
-            validate_src(&instr->arr.index, state, 32, 1);
+         if (nir_deref_is_array(instr))
+            validate_src(&instr->arr.index, state, 0, 1);
          break;
+
+      case nir_deref_type_ptr_as_array: {
+         /* parent can only be deref_casts with no parent */
+//         nir_deref_instr *parent = nir_deref_instr_parent(instr);
+//         validate_assert(state, parent);
+//         validate_assert(state, parent->deref_type == nir_deref_type_cast);
+//         validate_assert(state, !nir_deref_instr_parent(parent));
+         validate_src(&instr->arr.index, state, 0, 1);
+         break;
+      }
 
       default:
          unreachable("Invalid deref instruction type");

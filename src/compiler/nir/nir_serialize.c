@@ -438,6 +438,7 @@ write_deref(write_ctx *ctx, const nir_deref_instr *deref)
       break;
 
    case nir_deref_type_array:
+   case nir_deref_type_ptr_as_array:
       write_src(ctx, &deref->arr.index);
       break;
 
@@ -475,6 +476,7 @@ read_deref(read_ctx *ctx)
       break;
 
    case nir_deref_type_array:
+   case nir_deref_type_ptr_as_array:
       read_src(ctx, &deref->arr.index, &deref->instr);
       break;
 
