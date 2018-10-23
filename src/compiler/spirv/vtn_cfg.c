@@ -876,7 +876,7 @@ vtn_emit_cf_list(struct vtn_builder *b, struct list_head *cf_list,
             struct vtn_ssa_value *src = vtn_ssa_value(b, block->branch[1]);
             nir_deref_instr *ret_deref =
                nir_build_deref_cast(&b->nb, nir_load_param(&b->nb, 0),
-                                    nir_var_local, src->type);
+                                    nir_var_function, src->type);
             vtn_local_store(b, src, ret_deref);
          }
 

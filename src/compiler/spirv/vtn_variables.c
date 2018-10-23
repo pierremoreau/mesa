@@ -1566,12 +1566,12 @@ vtn_storage_class_to_mode(struct vtn_builder *b,
       nir_mode = nir_var_shader_out;
       break;
    case SpvStorageClassPrivate:
-      mode = vtn_variable_mode_global;
-      nir_mode = nir_var_global;
+      mode = vtn_variable_mode_private;
+      nir_mode = nir_var_private;
       break;
    case SpvStorageClassFunction:
       mode = vtn_variable_mode_local;
-      nir_mode = nir_var_local;
+      nir_mode = nir_var_function;
       break;
    case SpvStorageClassWorkgroup:
       mode = vtn_variable_mode_workgroup;
@@ -1732,7 +1732,7 @@ vtn_create_variable(struct vtn_builder *b, struct vtn_value *val,
 
    switch (var->mode) {
    case vtn_variable_mode_local:
-   case vtn_variable_mode_global:
+   case vtn_variable_mode_private:
    case vtn_variable_mode_uniform:
       /* For these, we create the variable normally */
       var->var = rzalloc(b->shader, nir_variable);
