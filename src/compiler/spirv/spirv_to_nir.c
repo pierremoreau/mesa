@@ -4099,11 +4099,8 @@ vtn_handle_body_instruction(struct vtn_builder *b, SpvOp opcode,
    case SpvOpSConvert:
    case SpvOpFConvert:
    case SpvOpQuantizeToF16:
-   case SpvOpConvertPtrToU:
-   case SpvOpConvertUToPtr:
    case SpvOpPtrCastToGeneric:
    case SpvOpGenericCastToPtr:
-   case SpvOpBitcast:
    case SpvOpIsNan:
    case SpvOpIsInf:
    case SpvOpIsFinite:
@@ -4186,6 +4183,12 @@ vtn_handle_body_instruction(struct vtn_builder *b, SpvOp opcode,
    case SpvOpMatrixTimesVector:
    case SpvOpMatrixTimesMatrix:
       vtn_handle_alu(b, opcode, w, count);
+      break;
+
+   case SpvOpConvertPtrToU:
+   case SpvOpConvertUToPtr:
+   case SpvOpBitcast:
+      vtn_handle_bitcast(b, opcode, w, count);
       break;
 
    case SpvOpVectorExtractDynamic:

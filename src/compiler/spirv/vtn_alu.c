@@ -378,6 +378,79 @@ handle_rounding_mode(struct vtn_builder *b, struct vtn_value *val, int member,
 }
 
 void
+vtn_handle_bitcast(struct vtn_builder *b, SpvOp opcode,
+                   const uint32_t *w, unsigned count)
+{
+   /* From the definition of OpBitcast in the SPIR-V 1.2 spec:
+    *
+    *    "If Result Type has the same number of components as Operand, they
+    *    must also have the same component width, and results are computed
+    *    per component.
+    *
+    *    If Result Type has a different number of components than Operand,
+    *    the total number of bits in Result Type must equal the total
+    *    number of bits in Operand. Let L be the type, either Result Type
+    *    or Operand’s type, that has the larger number of components. Let S
+    *    be the other type, with the smaller number of components. The
+    *    number of components in L must be an integer multiple of the
+    *    number of components in S.  The first component (that is, the only
+    *    or lowest-numbered component) of S maps to the first components of
+    *    L, and so on, up to the last component of S mapping to the last
+    *    components of L. Within this mapping, any single component of S
+    *    (mapping to multiple components of L) maps its lower-ordered bits
+    *    to the lower-numbered components of L."
+    */
+   struct vtn_type *type = vtn_value(b, w[1], vtn_value_type_type)->type;
+   struct vtn_value *src_val = vtn_untyped_value(b, w[3]);
+
+   struct nir_ssa_def *src;
+   struct vtn_value *val;
+   if (src_val->value_type == vtn_value_type_pointer) {
+      src = vtn_pointer_to_ssa(b, src_val->pointer);
+   } else {
+      struct vtn_ssa_value *ssa_val = vtn_ssa_value(b, w[3]);
+      vtn_assert(glsl_type_is_vector_or_scalar(ssa_val->type));
+      src = ssa_val->def;
+   }
+
+   struct nir_ssa_def *res;
+   switch (opcode) {
+   case SpvOpConvertUToPtr:
+   case SpvOpConvertPtrToU: {
+      nir_alu_type src_type = nir_type_uint | src->bit_size;
+      nir_alu_type dst_type = nir_type_uint | glsl_get_bit_size(type->type);
+
+      nir_op op = nir_type_conversion_op(src_type, dst_type, nir_rounding_mode_undef);
+      res = nir_build_alu(&b->nb, op, src, NULL, NULL, NULL);
+      break;
+   }
+   case SpvOpBitcast:
+      vtn_fail_if(src->num_components * src->bit_size !=
+                  glsl_get_vector_elements(type->type) * glsl_get_bit_size(type->type),
+                  "Source and destination of OpBitcast must have the same "
+                  "total number of bits");
+      res = nir_bitcast_vector(&b->nb, src, glsl_get_bit_size(type->type));
+      break;
+   default:
+      unreachable("unsupported opcode");
+      break;
+   }
+
+   if (type->base_type == vtn_base_type_pointer) {
+      val = vtn_push_value(b, w[2], vtn_value_type_pointer);
+      val->pointer = vtn_pointer_from_ssa(b, res, type);
+      val->pointer->offset = res;
+   } else {
+      val = vtn_push_value(b, w[2], vtn_value_type_ssa);
+      val->ssa = vtn_create_ssa_value(b, type->type);
+      val->ssa->def = res;
+   }
+   vtn_foreach_decoration(b, val, handle_no_contraction, NULL);
+
+   b->nb.exact = b->exact;
+}
+
+void
 vtn_handle_alu(struct vtn_builder *b, SpvOp opcode,
                const uint32_t *w, unsigned count)
 {
