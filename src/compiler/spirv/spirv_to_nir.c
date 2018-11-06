@@ -4371,6 +4371,38 @@ spirv_to_nir(const uint32_t *words, size_t word_count,
    nir_function *entry_point = b->entry_point->func->impl->function;
    vtn_assert(entry_point);
 
+   /* post process entry_points with input params */
+   if (entry_point->num_params) {
+      /* we shouldn't have any inputs yet */
+      vtn_assert(!entry_point->shader->num_inputs);
+
+      nir_function *main_entry_point = nir_function_create(b->shader, ralloc_strdup(b->shader, "main"));
+      main_entry_point->impl = nir_function_impl_create(main_entry_point);
+      nir_builder_init(&b->nb, main_entry_point->impl);
+      b->nb.cursor = nir_after_cf_list(&main_entry_point->impl->body);
+      b->func_param_idx = 0;
+
+      nir_call_instr *call = nir_call_instr_create(b->nb.shader, entry_point);
+
+      for (unsigned i = 0; i < entry_point->num_params; ++i) {
+         /* input variable */
+         nir_variable *in_var = rzalloc(b->nb.shader, nir_variable);
+         in_var->data.mode = nir_var_shader_in;
+         in_var->data.read_only = true;
+         in_var->data.location = i;
+         in_var->type = b->entry_point->func->type->params[i]->type;
+
+         nir_shader_add_variable(b->nb.shader, in_var);
+         b->nb.shader->num_inputs++;
+
+         call->params[i] = nir_src_for_ssa(nir_load_var(&b->nb, in_var));
+      }
+
+      nir_builder_instr_insert(&b->nb, &call->instr);
+
+      entry_point = main_entry_point;
+   }
+
    /* Unparent the shader from the vtn_builder before we delete the builder */
    ralloc_steal(NULL, b->shader);
 
