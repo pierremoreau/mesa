@@ -942,6 +942,8 @@ static const nir_shader_compiler_options nir_options = {
    .lower_cs_local_index_from_id = true,
    .lower_device_index_to_zero = false, // TODO
    .lower_wpos_pntc = false, // TODO
+   .lower_hadd = true, // TODO
+   .lower_add_sat = true, // TODO
    .use_interpolated_input_intrinsics = true,
    .max_unroll_iterations = 32,
 };
