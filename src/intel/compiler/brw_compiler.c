@@ -42,6 +42,9 @@
    .lower_fdiv = true,                                                        \
    .lower_flrp64 = true,                                                      \
    .lower_ldexp = true,                                                       \
+   .lower_fltu = true,                                                        \
+   .lower_fgeu = true,                                                        \
+   .lower_fne_to_fequ = true,                                                 \
    .lower_cs_local_id_from_index = true,                                      \
    .lower_device_index_to_zero = true,                                        \
    .native_integers = true,                                                   \

@@ -1366,6 +1366,28 @@ vec4_visitor::nir_emit_alu(nir_alu_instr *instr)
       break;
    }
 
+   case nir_op_fequ: {
+      dst_reg cmp_res = dst;
+      if (nir_src_bit_size(instr->src[0].src) == 64)
+         cmp_res = dst_reg(this, glsl_type::dvec4_type);
+
+      vec4_instruction *inst;
+      inst = emit(CMP(cmp_res, op[0], op[0], BRW_CONDITIONAL_NZ));
+      inst = emit(CMP(cmp_res, op[1], op[1], BRW_CONDITIONAL_NZ));
+      inst->predicate = BRW_PREDICATE_NORMAL;
+      inst->predicate_inverse = true;
+      inst = emit(CMP(cmp_res, op[0], op[1], BRW_CONDITIONAL_Z));
+      inst->predicate = BRW_PREDICATE_NORMAL;
+      inst->predicate_inverse = true;
+
+      if (nir_src_bit_size(instr->src[0].src) == 64) {
+         dst_reg cmp_res32 = dst_reg(this, glsl_type::bvec4_type);
+         emit(VEC4_OPCODE_PICK_LOW_32BIT, cmp_res32, src_reg(cmp_res));
+         emit(MOV(dst, src_reg(cmp_res32)));
+      }
+      break;
+   }
+
    case nir_op_ball_iequal2:
    case nir_op_ball_iequal3:
    case nir_op_ball_iequal4:
