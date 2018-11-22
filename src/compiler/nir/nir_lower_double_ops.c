@@ -100,7 +100,7 @@ fix_inv_result(nir_builder *b, nir_ssa_def *res, nir_ssa_def *src,
                    nir_imm_double(b, 0.0f), res);
 
    /* If the original input was 0, generate the correctly-signed infinity */
-   res = nir_bcsel(b, nir_fne(b, src, nir_imm_double(b, 0.0f)),
+   res = nir_bcsel(b, nir_fneu(b, src, nir_imm_double(b, 0.0f)),
                    res, get_signed_inf(b, src));
 
    return res;
@@ -427,7 +427,7 @@ lower_round_even(nir_builder *b, nir_ssa_def *src)
     */
    nir_ssa_def *fract = nir_ffract(b, src);
    return nir_bcsel(b,
-                    nir_fne(b, fract, nir_imm_double(b, 0.5)),
+                    nir_fneu(b, fract, nir_imm_double(b, 0.5)),
                     nir_ffloor(b, nir_fadd(b, src, nir_imm_double(b, 0.5))),
                     nir_bcsel(b,
                               nir_flt(b, mod, nir_imm_double(b, 1.0)),
@@ -451,7 +451,7 @@ lower_mod(nir_builder *b, nir_ssa_def *src0, nir_ssa_def *src1)
    nir_ssa_def *mod = nir_fsub(b, src0, nir_fmul(b, src1, floor));
 
    return nir_bcsel(b,
-                    nir_fne(b, mod, src1),
+                    nir_fneu(b, mod, src1),
                     mod,
                     nir_imm_double(b, 0.0));
 }

@@ -452,7 +452,7 @@ get_iteration(nir_op cond_op, nir_const_value *initial, nir_const_value *step,
    case nir_op_fge:
    case nir_op_flt:
    case nir_op_feq:
-   case nir_op_fne: {
+   case nir_op_fneu: {
       float initial_val = initial->f32[0];
       float span = limit->f32[0] - initial_val;
       iter = span / step->f32[0];
@@ -626,7 +626,7 @@ find_trip_count(loop_info_state *state)
       case nir_op_fge:      case nir_op_ige:      case nir_op_uge:
       case nir_op_flt:      case nir_op_ilt:      case nir_op_ult:
       case nir_op_feq:      case nir_op_ieq:
-      case nir_op_fne:      case nir_op_ine:
+      case nir_op_fneu:     case nir_op_ine:
 
          /* We assume that the limit is the "right" operand */
          basic_ind = get_loop_var(alu->src[0].src.ssa, state);

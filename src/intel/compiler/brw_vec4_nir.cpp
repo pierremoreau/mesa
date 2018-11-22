@@ -853,7 +853,7 @@ brw_conditional_for_nir_comparison(nir_op op)
    case nir_op_ball_iequal4:
       return BRW_CONDITIONAL_Z;
 
-   case nir_op_fne:
+   case nir_op_fneu:
    case nir_op_ine:
    case nir_op_bany_fnequal2:
    case nir_op_bany_inequal2:
@@ -1345,7 +1345,7 @@ vec4_visitor::nir_emit_alu(nir_alu_instr *instr)
    case nir_op_flt:
    case nir_op_fge:
    case nir_op_feq:
-   case nir_op_fne: {
+   case nir_op_fneu: {
       enum brw_conditional_mod conditional_mod =
          brw_conditional_for_nir_comparison(instr->op);
 

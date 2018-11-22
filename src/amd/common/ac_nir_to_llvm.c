@@ -702,7 +702,7 @@ static void visit_alu(struct ac_nir_context *ctx, const nir_alu_instr *instr)
 	case nir_op_feq:
 		result = emit_float_cmp(&ctx->ac, LLVMRealOEQ, src[0], src[1]);
 		break;
-	case nir_op_fne:
+	case nir_op_fneu:
 		result = emit_float_cmp(&ctx->ac, LLVMRealUNE, src[0], src[1]);
 		break;
 	case nir_op_flt:

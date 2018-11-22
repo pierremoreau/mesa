@@ -1009,7 +1009,7 @@ ntq_emit_comparison(struct vc4_compile *c, struct qreg *dest,
         case nir_op_seq:
                 cond = QPU_COND_ZS;
                 break;
-        case nir_op_fne:
+        case nir_op_fneu:
         case nir_op_ine:
         case nir_op_sne:
                 cond = QPU_COND_ZC;
@@ -1265,7 +1265,7 @@ ntq_emit_alu(struct vc4_compile *c, nir_alu_instr *instr)
         case nir_op_sge:
         case nir_op_slt:
         case nir_op_feq:
-        case nir_op_fne:
+        case nir_op_fneu:
         case nir_op_fge:
         case nir_op_flt:
         case nir_op_ieq:

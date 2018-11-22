@@ -386,7 +386,7 @@ build_frexp32(nir_builder *b, nir_ssa_def *x, nir_ssa_def **exponent)
    /* Exponent of floating-point values in the range [0.5, 1.0). */
    nir_ssa_def *exponent_value = nir_imm_int(b, 0x3f000000u);
 
-   nir_ssa_def *is_not_zero = nir_fne(b, abs_x, zero);
+   nir_ssa_def *is_not_zero = nir_fneu(b, abs_x, zero);
 
    *exponent =
       nir_iadd(b, nir_ushr(b, abs_x, exponent_shift),
@@ -426,7 +426,7 @@ build_frexp64(nir_builder *b, nir_ssa_def *x, nir_ssa_def **exponent)
    /* Exponent of floating-point values in the range [0.5, 1.0). */
    nir_ssa_def *exponent_value = nir_imm_int(b, 0x3fe00000u);
 
-   nir_ssa_def *is_not_zero = nir_fne(b, abs_x, zero);
+   nir_ssa_def *is_not_zero = nir_fneu(b, abs_x, zero);
 
    *exponent =
       nir_iadd(b, nir_ushr(b, abs_upper_x, exponent_shift),

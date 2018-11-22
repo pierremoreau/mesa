@@ -1054,7 +1054,7 @@ fs_visitor::nir_emit_alu(const fs_builder &bld, nir_alu_instr *instr)
    case nir_op_flt:
    case nir_op_fge:
    case nir_op_feq:
-   case nir_op_fne: {
+   case nir_op_fneu: {
       fs_reg dest = result;
 
       const uint32_t bit_size =  nir_src_bit_size(instr->src[0].src);
@@ -1072,7 +1072,7 @@ fs_visitor::nir_emit_alu(const fs_builder &bld, nir_alu_instr *instr)
       case nir_op_feq:
          cond = BRW_CONDITIONAL_Z;
          break;
-      case nir_op_fne:
+      case nir_op_fneu:
          cond = BRW_CONDITIONAL_NZ;
          break;
       default:

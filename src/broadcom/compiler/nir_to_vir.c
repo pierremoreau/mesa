@@ -514,7 +514,7 @@ ntq_emit_comparison(struct v3d_compile *c, struct qreg *dest,
                 vir_PF(c, vir_XOR(c, src0, src1), V3D_QPU_PF_PUSHZ);
                 break;
 
-        case nir_op_fne:
+        case nir_op_fneu:
         case nir_op_sne:
                 vir_PF(c, vir_FCMP(c, src0, src1), V3D_QPU_PF_PUSHZ);
                 cond_invert = true;
@@ -749,7 +749,7 @@ ntq_emit_alu(struct v3d_compile *c, nir_alu_instr *instr)
         case nir_op_sge:
         case nir_op_slt:
         case nir_op_feq:
-        case nir_op_fne:
+        case nir_op_fneu:
         case nir_op_fge:
         case nir_op_flt:
         case nir_op_ieq:

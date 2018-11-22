@@ -156,8 +156,8 @@ optimizations = [
    # Comparison simplifications
    (('~inot', ('flt', a, b)), ('fge', a, b)),
    (('~inot', ('fge', a, b)), ('flt', a, b)),
-   (('~inot', ('feq', a, b)), ('fne', a, b)),
-   (('~inot', ('fne', a, b)), ('feq', a, b)),
+   (('inot', ('feq', a, b)), ('fneu', a, b)),
+   (('inot', ('fneu', a, b)), ('feq', a, b)),
    (('inot', ('ilt', a, b)), ('ige', a, b)),
    (('inot', ('ult', a, b)), ('uge', a, b)),
    (('inot', ('ige', a, b)), ('ilt', a, b)),
@@ -173,16 +173,16 @@ optimizations = [
 
    (('fge', ('fneg', ('b2f', 'a@32')), 0.0), ('inot', a)),
 
-   (('fne', ('fadd', ('b2f', 'a@32'), ('b2f', 'b@32')), 0.0), ('ior', a, b)),
-   (('fne', ('fmax', ('b2f', 'a@32'), ('b2f', 'b@32')), 0.0), ('ior', a, b)),
-   (('fne', ('bcsel', a, 1.0, ('b2f', 'b@32'))   , 0.0), ('ior', a, b)),
-   (('fne', ('b2f', 'a@32'), ('fneg', ('b2f', 'b@32'))),      ('ior', a, b)),
-   (('fne', ('fmul', ('b2f', 'a@32'), ('b2f', 'b@32')), 0.0), ('iand', a, b)),
-   (('fne', ('fmin', ('b2f', 'a@32'), ('b2f', 'b@32')), 0.0), ('iand', a, b)),
-   (('fne', ('bcsel', a, ('b2f', 'b@32'), 0.0)   , 0.0), ('iand', a, b)),
-   (('fne', ('fadd', ('b2f', 'a@32'), ('fneg', ('b2f', 'b@32'))), 0.0), ('ixor', a, b)),
-   (('fne',          ('b2f', 'a@32') ,          ('b2f', 'b@32') ),      ('ixor', a, b)),
-   (('fne', ('fneg', ('b2f', 'a@32')), ('fneg', ('b2f', 'b@32'))),      ('ixor', a, b)),
+   (('fneu', ('fadd', ('b2f', 'a@32'), ('b2f', 'b@32')), 0.0), ('ior', a, b)),
+   (('fneu', ('fmax', ('b2f', 'a@32'), ('b2f', 'b@32')), 0.0), ('ior', a, b)),
+   (('fneu', ('bcsel', a, 1.0, ('b2f', 'b@32'))   , 0.0), ('ior', a, b)),
+   (('fneu', ('b2f', 'a@32'), ('fneg', ('b2f', 'b@32'))),      ('ior', a, b)),
+   (('fneu', ('fmul', ('b2f', 'a@32'), ('b2f', 'b@32')), 0.0), ('iand', a, b)),
+   (('fneu', ('fmin', ('b2f', 'a@32'), ('b2f', 'b@32')), 0.0), ('iand', a, b)),
+   (('fneu', ('bcsel', a, ('b2f', 'b@32'), 0.0)   , 0.0), ('iand', a, b)),
+   (('fneu', ('fadd', ('b2f', 'a@32'), ('fneg', ('b2f', 'b@32'))), 0.0), ('ixor', a, b)),
+   (('fneu',          ('b2f', 'a@32') ,          ('b2f', 'b@32') ),      ('ixor', a, b)),
+   (('fneu', ('fneg', ('b2f', 'a@32')), ('fneg', ('b2f', 'b@32'))),      ('ixor', a, b)),
    (('feq', ('fadd', ('b2f', 'a@32'), ('b2f', 'b@32')), 0.0), ('inot', ('ior', a, b))),
    (('feq', ('fmax', ('b2f', 'a@32'), ('b2f', 'b@32')), 0.0), ('inot', ('ior', a, b))),
    (('feq', ('bcsel', a, 1.0, ('b2f', 'b@32'))   , 0.0), ('inot', ('ior', a, b))),
@@ -218,7 +218,7 @@ optimizations = [
    (('~flt', ('fadd', a, b), a), ('flt', b, 0.0)),
    (('~fge', ('fadd', a, b), a), ('fge', b, 0.0)),
    (('~feq', ('fadd', a, b), a), ('feq', b, 0.0)),
-   (('~fne', ('fadd', a, b), a), ('fne', b, 0.0)),
+   (('~fneu', ('fadd', a, b), a), ('fneu', b, 0.0)),
 
    # Cannot remove the addition from ilt or ige due to overflow.
    (('ieq', ('iadd', a, b), a), ('ieq', b, 0)),
@@ -238,17 +238,17 @@ optimizations = [
    (('feq', ('fmin', ('fneg', ('b2f', 'a@32')), 'b@32'), 0.0), ('iand', ('inot', a), ('fge', b, 0.0))),
 
    (('feq', ('b2f', 'a@32'), 0.0), ('inot', a)),
-   (('fne', ('b2f', 'a@32'), 0.0), a),
+   (('fneu', ('b2f', 'a@32'), 0.0), a),
    (('ieq', ('b2i', 'a@32'), 0),   ('inot', a)),
    (('ine', ('b2i', 'a@32'), 0),   a),
 
-   (('fne', ('u2f', a), 0.0), ('ine', a, 0)),
+   (('fneu', ('u2f', a), 0.0), ('ine', a, 0)),
    (('feq', ('u2f', a), 0.0), ('ieq', a, 0)),
    (('fge', ('u2f', a), 0.0), True),
    (('fge', 0.0, ('u2f', a)), ('uge', 0, a)),    # ieq instead?
    (('flt', ('u2f', a), 0.0), False),
    (('flt', 0.0, ('u2f', a)), ('ult', 0, a)),    # ine instead?
-   (('fne', ('i2f', a), 0.0), ('ine', a, 0)),
+   (('fneu', ('i2f', a), 0.0), ('ine', a, 0)),
    (('feq', ('i2f', a), 0.0), ('ieq', a, 0)),
    (('fge', ('i2f', a), 0.0), ('ige', a, 0)),
    (('fge', 0.0, ('i2f', a)), ('ige', 0, a)),
@@ -259,11 +259,11 @@ optimizations = [
    # fabs(a) > 0.0
    # fabs(a) != 0.0 because fabs(a) must be >= 0
    # a != 0.0
-   (('~flt', 0.0, ('fabs', a)), ('fne', a, 0.0)),
+   (('~flt', 0.0, ('fabs', a)), ('fneu', a, 0.0)),
 
    # -fabs(a) < 0.0
    # fabs(a) > 0.0
-   (('~flt', ('fneg', ('fabs', a)), 0.0), ('fne', a, 0.0)),
+   (('~flt', ('fneg', ('fabs', a)), 0.0), ('fneu', a, 0.0)),
 
    # 0.0 >= fabs(a)
    # 0.0 == fabs(a)   because fabs(a) must be >= 0
@@ -431,8 +431,8 @@ optimizations = [
    (('slt', a, b), ('b2f', ('flt', a, b)), 'options->lower_scmp'),
    (('sge', a, b), ('b2f', ('fge', a, b)), 'options->lower_scmp'),
    (('seq', a, b), ('b2f', ('feq', a, b)), 'options->lower_scmp'),
-   (('sne', a, b), ('b2f', ('fne', a, b)), 'options->lower_scmp'),
-   (('fne', ('fneg', a), a), ('fne', a, 0.0)),
+   (('sne', a, b), ('b2f', ('fneu', a, b)), 'options->lower_scmp'),
+   (('fneu', ('fneg', a), a), ('fneu', a, 0.0)),
    (('feq', ('fneg', a), a), ('feq', a, 0.0)),
    # Emulating booleans
    (('imul', ('b2i', 'a@32'), ('b2i', 'b@32')), ('b2i', ('iand', a, b))),
@@ -745,7 +745,7 @@ optimizations = [
      'options->lower_unpack_snorm_4x8'),
 ]
 
-invert = OrderedDict([('feq', 'fne'), ('fne', 'feq'), ('fge', 'flt'), ('flt', 'fge')])
+invert = OrderedDict([('feq', 'fneu'), ('fneu', 'feq'), ('fge', 'flt'), ('flt', 'fge')])
 
 for left, right in itertools.combinations_with_replacement(invert.keys(), 2):
    optimizations.append((('inot', ('ior(is_used_once)', (left, a, b), (right, c, d))),
@@ -842,7 +842,7 @@ for op in ['flt', 'fge', 'feq']:
 # which constant folding will eat for lunch.  The resulting ternary will
 # further get cleaned up by the boolean reductions above and we will be
 # left with just the original variable "a".
-for op in ['flt', 'fge', 'feq', 'fne',
+for op in ['flt', 'fge', 'feq', 'fneu',
            'ilt', 'ige', 'ieq', 'ine', 'ult', 'uge']:
    optimizations += [
       ((op, ('bcsel', 'a', '#b', '#c'), '#d'),
@@ -899,7 +899,7 @@ late_optimizations = [
    (('~fge',          ('fadd', a, b),  0.0), ('fge',          a, ('fneg', b))),
    (('~fge', ('fneg', ('fadd', a, b)), 0.0), ('fge', ('fneg', a),         b)),
    (('~feq', ('fadd', a, b), 0.0), ('feq', a, ('fneg', b))),
-   (('~fne', ('fadd', a, b), 0.0), ('fne', a, ('fneg', b))),
+   (('~fneu', ('fadd', a, b), 0.0), ('fneu', a, ('fneg', b))),
 
    (('~fge', ('fmin(is_used_once)', ('fadd(is_used_once)', a, b), ('fadd', c, d)), 0.0), ('iand', ('fge', a, ('fneg', b)), ('fge', c, ('fneg', d)))),
 
