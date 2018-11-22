@@ -165,6 +165,11 @@ optimizations = [
    (('inot', ('ieq', a, b)), ('ine', a, b)),
    (('inot', ('ine', a, b)), ('ieq', a, b)),
 
+   # Comparison lowering
+   (('fltu', a, b), ('inot', ('fge', a, b)), 'options->lower_fltu'),
+   (('fgeu', a, b), ('inot', ('flt', a, b)), 'options->lower_fgeu'),
+   (('fne', a, b), ('inot', ('fequ', a, b)), 'options->lower_fne_to_fequ'),
+
    # 0.0 >= b2f(a)
    # b2f(a) <= 0.0
    # b2f(a) == 0.0 because b2f(a) can only be 0 or 1
