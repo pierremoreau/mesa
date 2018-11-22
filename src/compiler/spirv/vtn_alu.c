@@ -265,26 +265,26 @@ vtn_nir_alu_op_for_spirv_opcode(struct vtn_builder *b,
     * ordered.
     */
    case SpvOpFOrdEqual:                            return nir_op_feq;
-   case SpvOpFUnordEqual:                          return nir_op_feq;
+   case SpvOpFUnordEqual:                          return nir_op_fequ;
    case SpvOpINotEqual:                            return nir_op_ine;
-   case SpvOpFOrdNotEqual:                         return nir_op_fneu;
+   case SpvOpFOrdNotEqual:                         return nir_op_fne;
    case SpvOpFUnordNotEqual:                       return nir_op_fneu;
    case SpvOpULessThan:                            return nir_op_ult;
    case SpvOpSLessThan:                            return nir_op_ilt;
    case SpvOpFOrdLessThan:                         return nir_op_flt;
-   case SpvOpFUnordLessThan:                       return nir_op_flt;
+   case SpvOpFUnordLessThan:                       return nir_op_fltu;
    case SpvOpUGreaterThan:          *swap = true;  return nir_op_ult;
    case SpvOpSGreaterThan:          *swap = true;  return nir_op_ilt;
    case SpvOpFOrdGreaterThan:       *swap = true;  return nir_op_flt;
-   case SpvOpFUnordGreaterThan:     *swap = true;  return nir_op_flt;
+   case SpvOpFUnordGreaterThan:     *swap = true;  return nir_op_fltu;
    case SpvOpULessThanEqual:        *swap = true;  return nir_op_uge;
    case SpvOpSLessThanEqual:        *swap = true;  return nir_op_ige;
    case SpvOpFOrdLessThanEqual:     *swap = true;  return nir_op_fge;
-   case SpvOpFUnordLessThanEqual:   *swap = true;  return nir_op_fge;
+   case SpvOpFUnordLessThanEqual:   *swap = true;  return nir_op_fgeu;
    case SpvOpUGreaterThanEqual:                    return nir_op_uge;
    case SpvOpSGreaterThanEqual:                    return nir_op_ige;
    case SpvOpFOrdGreaterThanEqual:                 return nir_op_fge;
-   case SpvOpFUnordGreaterThanEqual:               return nir_op_fge;
+   case SpvOpFUnordGreaterThanEqual:               return nir_op_fgeu;
 
    /* Conversions: */
    case SpvOpQuantizeToF16:         return nir_op_fquantize2f16;
@@ -505,55 +505,6 @@ vtn_handle_alu(struct vtn_builder *b, SpvOp opcode,
    case SpvOpIsInf: {
       nir_ssa_def *inf = nir_imm_floatN_t(&b->nb, INFINITY, src[0]->bit_size);
       val->ssa->def = nir_ieq(&b->nb, nir_fabs(&b->nb, src[0]), inf);
-      break;
-   }
-
-   case SpvOpFUnordEqual:
-   case SpvOpFUnordNotEqual:
-   case SpvOpFUnordLessThan:
-   case SpvOpFUnordGreaterThan:
-   case SpvOpFUnordLessThanEqual:
-   case SpvOpFUnordGreaterThanEqual: {
-      bool swap;
-      unsigned src_bit_size = glsl_get_bit_size(vtn_src[0]->type);
-      unsigned dst_bit_size = glsl_get_bit_size(type);
-      nir_op op = vtn_nir_alu_op_for_spirv_opcode(b, opcode, &swap,
-                                                  src_bit_size, dst_bit_size);
-
-      if (swap) {
-         nir_ssa_def *tmp = src[0];
-         src[0] = src[1];
-         src[1] = tmp;
-      }
-
-      val->ssa->def =
-         nir_ior(&b->nb,
-                 nir_build_alu(&b->nb, op, src[0], src[1], NULL, NULL),
-                 nir_ior(&b->nb,
-                         nir_fneu(&b->nb, src[0], src[0]),
-                         nir_fneu(&b->nb, src[1], src[1])));
-      break;
-   }
-
-   case SpvOpFOrdNotEqual: {
-      /* For all the SpvOpFOrd* comparisons apart from NotEqual, the value
-       * from the ALU will probably already be false if the operands are not
-       * ordered so we don’t need to handle it specially.
-       */
-      bool swap;
-      unsigned src_bit_size = glsl_get_bit_size(vtn_src[0]->type);
-      unsigned dst_bit_size = glsl_get_bit_size(type);
-      nir_op op = vtn_nir_alu_op_for_spirv_opcode(b, opcode, &swap,
-                                                  src_bit_size, dst_bit_size);
-
-      assert(!swap);
-
-      val->ssa->def =
-         nir_iand(&b->nb,
-                  nir_build_alu(&b->nb, op, src[0], src[1], NULL, NULL),
-                  nir_iand(&b->nb,
-                          nir_feq(&b->nb, src[0], src[0]),
-                          nir_feq(&b->nb, src[1], src[1])));
       break;
    }
 
