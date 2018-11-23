@@ -377,6 +377,9 @@ Converter::getOperation(nir_op op)
    CASE_OPFI_RET(neg, OP_NEG);
    CASE_OPFI_RET(not, OP_NOT);
    CASE_OPFI_RET(or, OP_OR);
+   case nir_op_fgeu:
+   case nir_op_fltu:
+   case nir_op_fneu:
    CASE_OPFI_RET(eq, OP_SET);
    CASE_OPFIU_RET(ge, OP_SET);
    CASE_OPFIU_RET(lt, OP_SET);
@@ -577,14 +580,18 @@ Converter::getCondCode(nir_op op)
    switch (op) {
    CASE_OPFI(eq):
       return CC_EQ;
+   CASE_OPFI(ne):
+      return CC_NE;
    CASE_OPFIU(ge):
       return CC_GE;
    CASE_OPFIU(lt):
       return CC_LT;
-   case nir_op_fne:
+   case nir_op_fgeu:
+      return CC_GEU;
+   case nir_op_fneu:
       return CC_NEU;
-   case nir_op_ine:
-      return CC_NE;
+   case nir_op_fltu:
+      return CC_LTU;
    default:
       ERROR("couldn't get CondCode for op %s\n", nir_op_infos[op].name);
       assert(false);
@@ -2651,7 +2658,10 @@ Converter::visit(nir_alu_instr *insn)
    CASE_OPFI(eq):
    CASE_OPFIU(ge):
    CASE_OPFIU(lt):
-   CASE_OPFI(ne): {
+   CASE_OPFI(ne):
+   case nir_op_fneu:
+   case nir_op_fgeu:
+   case nir_op_fltu: {
       DEFAULT_CHECKS;
       LValues &newDefs = convert(&insn->dest);
       Instruction *i = mkCmp(getOperation(op),
