@@ -38,7 +38,6 @@
 #include "ir3.h"
 #include "ir3_context.h"
 
-
 static struct ir3_instruction *
 create_indirect_load(struct ir3_context *ctx, unsigned arrsz, int n,
 		struct ir3_instruction *address, struct ir3_instruction *collect)
@@ -2750,6 +2749,7 @@ static const unsigned max_sysvals[] = {
 	[MESA_SHADER_FRAGMENT] = 24,  // TODO
 	[MESA_SHADER_VERTEX]  = 16,
 	[MESA_SHADER_COMPUTE] = 16, // TODO how many do we actually need?
+	[MESA_SHADER_KERNEL]  = 16, // TODO how many do we actually need?
 };
 
 static void
