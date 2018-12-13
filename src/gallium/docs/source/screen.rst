@@ -480,6 +480,8 @@ subpixel precision bias in bits during conservative rasterization.
 * ``PIPE_CAP_SURFACE_SAMPLE_COUNT_TEXTURE``: Whether the driver
   supports pipe_surface overrides of resource nr_samples. If set, will
   enable EXT_multisampled_render_to_texture.
+* ``PIPE_CAP_SVM_SUPPORT``: Bitfield specifiying the drivers SVM capabilities.
+  See CL_DEVICE_SVM_CAPABILITIES for more information.
 
 .. _pipe_capf:
 
