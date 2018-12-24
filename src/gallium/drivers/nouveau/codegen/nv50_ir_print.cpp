@@ -546,7 +546,9 @@ int Symbol::print(char *buf, size_t size,
       break;
    }
 
-   if (c == 'c')
+   // TODO: Printing the global buffer index should be restricted to NV50
+   // targets.
+   if (c == 'c' || c == 'g')
       PRINT("%s%c%i[", colour[TXT_MEM], c, reg.fileIndex);
    else
       PRINT("%s%c[", colour[TXT_MEM], c);
