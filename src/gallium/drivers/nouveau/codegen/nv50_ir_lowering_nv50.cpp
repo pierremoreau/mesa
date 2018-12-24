@@ -193,6 +193,17 @@ expandIntegerMUL(BuildUtil *bld, Instruction *mul)
    return true;
 }
 
+static void
+handleLDST(Instruction *i, Program *prog)
+{
+   if (i->src(0).getFile() == FILE_SHADER_INPUT) {
+      if (prog->getType() == Program::TYPE_COMPUTE) {
+         i->getSrc(0)->reg.file = FILE_MEMORY_CONST;
+         i->getSrc(0)->reg.fileIndex = 0;
+      }
+   }
+}
+
 #define QOP_ADD  0
 #define QOP_SUBR 1
 #define QOP_SUB  2
@@ -623,6 +634,7 @@ private:
    bool handlePFETCH(Instruction *);
    bool handleEXPORT(Instruction *);
    bool handleLOAD(Instruction *);
+   bool handleSTORE(Instruction *);
 
    bool handleDIV(Instruction *);
    bool handleSQRT(Instruction *);
@@ -1328,6 +1340,20 @@ NV50LoweringPreSSA::handleLOAD(Instruction *i)
       i->setIndirect(0, 0, addr);
    }
 
+   Program *prog = bld.getProgram();
+
+   handleLDST(i, prog);
+
+   return true;
+}
+
+bool
+NV50LoweringPreSSA::handleSTORE(Instruction *i)
+{
+   Program *prog = bld.getProgram();
+
+   handleLDST(i, prog);
+
    return true;
 }
 
@@ -1428,6 +1454,8 @@ NV50LoweringPreSSA::visit(Instruction *i)
       return handleEXPORT(i);
    case OP_LOAD:
       return handleLOAD(i);
+   case OP_STORE:
+      return handleSTORE(i);
    case OP_RDSV:
       return handleRDSV(i);
    case OP_WRSV:
