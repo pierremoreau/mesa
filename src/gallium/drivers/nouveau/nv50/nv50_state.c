@@ -646,6 +646,9 @@ nv50_bind_sampler_states(struct pipe_context *pipe,
                          unsigned num_samplers, void **samplers)
 {
    assert(start == 0);
+   // FIXME(pmoreau): Need to properly handle sampler binding for CP.
+   if (num_samplers == 0u)
+      return;
    switch (shader) {
    case PIPE_SHADER_VERTEX:
       nv50_vp_sampler_states_bind(pipe, num_samplers, samplers);
