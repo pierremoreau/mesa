@@ -29,7 +29,6 @@
 #include <llvm/IR/DiagnosticPrinter.h>
 #include <llvm/IR/DiagnosticInfo.h>
 #include <llvm/IR/LLVMContext.h>
-#include <llvm/Support/raw_ostream.h>
 #include <llvm/Transforms/IPO/PassManagerBuilder.h>
 #include <llvm-c/Target.h>
 #ifdef CLOVER_ALLOW_SPIRV
@@ -466,14 +465,14 @@ clover::llvm::compile_to_spirv(const std::string &source,
       throw error(CL_INVALID_VALUE);
    }
 
-   ::llvm::SmallVector<char, 1024> data;
-   ::llvm::raw_svector_ostream os { data };
+   std::ostringstream os(std::ios_base::binary | std::ios_base::trunc);
    if (!::llvm::writeSpirv(mod.get(), os, error_msg)) {
       r_log += "Translation from LLVM IR to SPIR-V failed: " + error_msg + ".\n";
       throw error(CL_INVALID_VALUE);
    }
 
-   std::vector<char> binary(os.str().begin(), os.str().end());
+   const std::string moduleString = os.str();
+   std::vector<char> binary(moduleString.begin(), moduleString.end());
    if (binary.empty()) {
       r_log += "Failed to retrieve SPIR-V binary.\n";
       throw error(CL_INVALID_VALUE);
