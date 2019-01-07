@@ -731,10 +731,26 @@ clover::spirv::is_valid_spirv(const uint32_t *binary, size_t length,
    spvTool.Validate(binary, length);
    return true;
 }
+#else
+module
+clover::spirv::link_program(const std::vector<module> &/*modules*/,
+                            const device &/*dev*/, const std::string &/*opts*/,
+                            std::string &r_log) {
+   r_log += "SPIRV-Tools and llvm-spirv are required for linking SPIR-V binaries.\n";
+   throw error(CL_LINKER_NOT_AVAILABLE);
+}
+
+bool
+clover::spirv::is_valid_spirv(const uint32_t * /*binary*/, size_t /*length*/,
+                              const std::string &/*opencl_version*/,
+                              const context::notify_action &/*notify*/) {
+   return false;
+}
+#endif
 
 void *
 clover::spirv::spirv_to_nir(const module &m, const std::string &name,
-      const nir_shader_compiler_options *nir_options) {
+                            const nir_shader_compiler_options *nir_options) {
    auto msec = find(type_equals(module::section::text_executable), m.secs);
 
    spirv_to_nir_options spirv_options = {
@@ -820,20 +836,3 @@ clover::spirv::spirv_to_nir(const module &m, const std::string &name,
 
    return nir;
 }
-
-#else
-module
-clover::spirv::link_program(const std::vector<module> &/*modules*/,
-                            const device &/*dev*/, const std::string &/*opts*/,
-                            std::string &r_log) {
-   r_log += "SPIRV-Tools and llvm-spirv are required for linking SPIR-V binaries.\n";
-   throw error(CL_LINKER_NOT_AVAILABLE);
-}
-
-bool
-clover::spirv::is_valid_spirv(const uint32_t * /*binary*/, size_t /*length*/,
-                              const std::string &/*opencl_version*/,
-                              const context::notify_action &/*notify*/) {
-   return false;
-}
-#endif

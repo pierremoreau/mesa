@@ -57,7 +57,7 @@ namespace clover {
 
       // Generates a nir program for a linked spirv module
       void *spirv_to_nir(const module &m, const std::string &name,
-            const nir_shader_compiler_options *options);
+                         const nir_shader_compiler_options *options);
    }
 }
 
